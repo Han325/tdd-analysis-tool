@@ -2,3 +2,4 @@ venv
 apache_repos
 results
 .DS_Store
+logs

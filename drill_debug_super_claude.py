@@ -16,21 +16,18 @@ from javalang.tree import MethodDeclaration, ClassDeclaration
 import networkx as nx
 
 # Create logs directory if it doesn't exist
-if not os.path.exists('logs'):
-    os.makedirs('logs')
+if not os.path.exists("logs"):
+    os.makedirs("logs")
 
 # Create timestamped log filename
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-log_file = os.path.join('logs', f'tdd_analysis_{timestamp}.log')
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_file = os.path.join("logs", f"tdd_analysis_{timestamp}.log")
 
-# Configure logging
+# Configure logging (DISABLED)
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
 )
 
 # List of repository URLs
@@ -134,21 +131,16 @@ class CommitGraph:
 
 
 def clone_repos(repo_urls, clone_dir):
-    logging.info(f"Starting repository cloning process for {len(repo_urls)} repos")
     if not os.path.exists(clone_dir):
         os.makedirs(clone_dir)
-        logging.debug(f"Created clone directory: {clone_dir}")
 
     for url in repo_urls:
         repo_name = url.split("/")[-1].replace(".git", "")
         repo_path = os.path.join(clone_dir, repo_name)
-        logging.debug(f"Processing repository: {repo_name}")
 
         if not os.path.exists(repo_path):
-            logging.info(f"Cloning {repo_name}...")
             try:
                 Repo.clone_from(url, repo_path)
-                logging.info(f"Successfully cloned {repo_name}")
             except Exception as e:
                 logging.error(f"Failed to clone {repo_name}: {str(e)}")
         else:
@@ -156,246 +148,221 @@ def clone_repos(repo_urls, clone_dir):
 
 
 def analyze_java_content(content: str) -> FileContent:
-    try:
-        tree = javalang.parse.parse(content)
-        imports = [imp.path for imp in tree.imports]
+    tree = javalang.parse.parse(content)
+    imports = [imp.path for imp in tree.imports]
 
-        class_names = []
-        method_names = []
-        is_abstract = False
-        is_utility = False
-        test_frameworks = []
-        test_methods = []
-        dependencies = []
+    class_names = []
+    method_names = []
+    is_abstract = False
+    is_utility = False
+    test_frameworks = []
+    test_methods = []
+    dependencies = []
 
-        for path, node in tree.filter(ClassDeclaration):
-            class_names.append(node.name)
+    for path, node in tree.filter(ClassDeclaration):
+        class_names.append(node.name)
 
-            # Check for abstract class
-            if "abstract" in node.modifiers:
-                is_abstract = True
+        # Check for abstract class
+        if "abstract" in node.modifiers:
+            is_abstract = True
 
-            # Check for utility class (all static methods)
-            if all("static" in method.modifiers for method in node.methods):
-                is_utility = True
+        # Check for utility class (all static methods)
+        if all("static" in method.modifiers for method in node.methods):
+            is_utility = True
 
-            # Analyze methods
-            for method in node.methods:
-                method_names.append(method.name)
+        # Analyze methods
+        for method in node.methods:
+            method_names.append(method.name)
 
-                # Check for test methods
-                for annotation in method.annotations:
-                    if annotation.name in TEST_PATTERNS["java"]["annotations"]:
-                        test_methods.append(method.name)
+            # Check for test methods
+            for annotation in method.annotations:
+                if annotation.name in TEST_PATTERNS["java"]["annotations"]:
+                    test_methods.append(method.name)
 
-        # Check for test framework imports
-        for framework in TEST_PATTERNS["java"]["frameworks"]:
-            if any(framework in imp for imp in imports):
-                test_frameworks.append(framework)
+    # Check for test framework imports
+    for framework in TEST_PATTERNS["java"]["frameworks"]:
+        if any(framework in imp for imp in imports):
+            test_frameworks.append(framework)
 
-        # Extract dependencies
-        dependencies = imports + [
-            ref[1].name
-            for ref in tree.filter(javalang.tree.ReferenceType)
-            if hasattr(ref[1], "name")
-        ]
+    # Extract dependencies
+    dependencies = imports + [
+        ref[1].name
+        for ref in tree.filter(javalang.tree.ReferenceType)
+        if hasattr(ref[1], "name")
+    ]
 
-        return FileContent(
-            raw_content=content,
-            imports=imports,
-            class_names=class_names,
-            method_names=method_names,
-            is_abstract=is_abstract,
-            is_utility=is_utility,
-            test_frameworks=test_frameworks,
-            test_methods=test_methods,
-            dependencies=dependencies,
-        )
-    except:
-        logging.error(f"Failed to parse Java content")
-        return FileContent("", [], [], [], False, False, [], [], [])
+    return FileContent(
+        raw_content=content,
+        imports=imports,
+        class_names=class_names,
+        method_names=method_names,
+        is_abstract=is_abstract,
+        is_utility=is_utility,
+        test_frameworks=test_frameworks,
+        test_methods=test_methods,
+        dependencies=dependencies,
+    )
 
 
 def analyze_python_content(content: str) -> FileContent:
-    try:
-        tree = ast.parse(content)
-        imports = []
-        class_names = []
-        method_names = []
-        is_abstract = False
-        is_utility = True  # Assume utility until we find instance methods
-        test_frameworks = []
-        test_methods = []
-        dependencies = []
+    tree = ast.parse(content)
+    imports = []
+    class_names = []
+    method_names = []
+    is_abstract = False
+    is_utility = True  # Assume utility until we find instance methods
+    test_frameworks = []
+    test_methods = []
+    dependencies = []
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imports.extend(name.name for name in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imports.append(f"{node.module}.{name.name}" for name in node.names)
-            elif isinstance(node, ast.ClassDef):
-                class_names.append(node.name)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend(name.name for name in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imports.append(f"{node.module}.{name.name}" for name in node.names)
+        elif isinstance(node, ast.ClassDef):
+            class_names.append(node.name)
 
-                # Check for abstract base classes
-                if any(
-                    base.id == "ABC"
-                    for base in node.bases
-                    if isinstance(base, ast.Name)
-                ):
-                    is_abstract = True
+            # Check for abstract base classes
+            if any(
+                base.id == "ABC" for base in node.bases if isinstance(base, ast.Name)
+            ):
+                is_abstract = True
 
-                # Check methods
-                for child in node.body:
-                    if isinstance(child, ast.FunctionDef):
-                        method_names.append(child.name)
+            # Check methods
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef):
+                    method_names.append(child.name)
 
-                        # Check for instance methods (non-static)
-                        if child.args.args and child.args.args[0].arg == "self":
-                            is_utility = False
+                    # Check for instance methods (non-static)
+                    if child.args.args and child.args.args[0].arg == "self":
+                        is_utility = False
 
-                        # Check for test methods
-                        if child.name.startswith("test_"):
-                            test_methods.append(child.name)
+                    # Check for test methods
+                    if child.name.startswith("test_"):
+                        test_methods.append(child.name)
 
-                        # Check for test decorators
-                        for decorator in child.decorator_list:
-                            if isinstance(decorator, ast.Name):
-                                decorator_name = f"@{decorator.id}"
-                                if (
-                                    decorator_name
-                                    in TEST_PATTERNS["python"]["decorators"]
-                                ):
-                                    test_methods.append(child.name)
+                    # Check for test decorators
+                    for decorator in child.decorator_list:
+                        if isinstance(decorator, ast.Name):
+                            decorator_name = f"@{decorator.id}"
+                            if decorator_name in TEST_PATTERNS["python"]["decorators"]:
+                                test_methods.append(child.name)
 
-        # Check for test framework imports
-        for framework in TEST_PATTERNS["python"]["frameworks"]:
-            if framework in imports:
-                test_frameworks.append(framework)
+    # Check for test framework imports
+    for framework in TEST_PATTERNS["python"]["frameworks"]:
+        if framework in imports:
+            test_frameworks.append(framework)
 
-        return FileContent(
-            raw_content=content,
-            imports=imports,
-            class_names=class_names,
-            method_names=method_names,
-            is_abstract=is_abstract,
-            is_utility=is_utility,
-            test_frameworks=test_frameworks,
-            test_methods=test_methods,
-            dependencies=imports,
-        )
-    except:
-        logging.error(f"Failed to parse Python content")
-        return FileContent("", [], [], [], False, False, [], [], [])
+    return FileContent(
+        raw_content=content,
+        imports=imports,
+        class_names=class_names,
+        method_names=method_names,
+        is_abstract=is_abstract,
+        is_utility=is_utility,
+        test_frameworks=test_frameworks,
+        test_methods=test_methods,
+        dependencies=imports,
+    )
 
 
-def get_file_creation_dates(repo_path: str) -> Tuple[Dict[str, FileHistory], CommitGraph]:
-    logging.info(f"Starting file history analysis for repo: {repo_path}")
+def get_file_creation_dates(
+    repo_path: str,
+) -> Tuple[Dict[str, FileHistory], CommitGraph]:
     file_histories: Dict[str, FileHistory] = {}
     commit_graph = CommitGraph()
 
-    try:
-        repo = Repo(repo_path)
-        default_branch = repo.active_branch.name
-        logging.debug(f"Using default branch: {default_branch}")
+    repo = Repo(repo_path)
+    default_branch = repo.active_branch.name
 
-        commit_count = 0
-        for commit in Repository(repo_path, only_in_branch=default_branch).traverse_commits():
-            commit_count += 1
-            
-            # Add commit to graph
-            if isinstance(commit, Commit):
-                commit_graph.add_commit(
-                    commit.hash,
-                    [p.hash for p in commit.parents],
-                    default_branch
+    commit_count = 0
+    for commit in Repository(
+        repo_path, only_in_branch=default_branch
+    ).traverse_commits():
+        commit_count += 1
+
+        # Add commit to graph
+        if isinstance(commit, Commit):
+            commit_graph.add_commit(
+                commit.hash, [p.hash for p in commit.parents], default_branch
+            )
+
+        logging.debug(f"Processing commit {commit.hash[:8]} from {commit.author_date}")
+
+        for modification in commit.modified_files:
+            current_path = modification.new_path or modification.old_path
+            if not current_path:
+                logging.warning(
+                    f"Skipping modification with no path in commit {commit.hash[:8]}"
                 )
-            
-            logging.debug(f"Processing commit {commit.hash[:8]} from {commit.author_date}")
-            
-            for modification in commit.modified_files:
-                current_path = modification.new_path or modification.old_path
-                if not current_path:
-                    logging.warning(f"Skipping modification with no path in commit {commit.hash[:8]}")
-                    continue
+                continue
 
-                normalized_path = os.path.normpath(current_path)
-                basename = os.path.basename(normalized_path)
-                directory = os.path.dirname(normalized_path)
-                
-                logging.debug(f"Processing file: {normalized_path}")
-                logging.debug(f"Change type: {modification.change_type}")
+            normalized_path = os.path.normpath(current_path)
+            basename = os.path.basename(normalized_path)
+            directory = os.path.dirname(normalized_path)
 
-                if modification.change_type == ModificationType.ADD:
-                    if normalized_path not in file_histories:
-                        # Parse content based on file type
-                        content = FileContent("", [], [], [], False, False, [], [], [])
-                        if normalized_path.endswith('.java'):
-                            try:
-                                content = analyze_java_content(modification.source_code)
-                            except Exception as e:
-                                print(e)
-                                logging.error(f"Failed to analyze Java content: {str(e)}")
-                        elif normalized_path.endswith('.py'):
-                            try:
-                                content = analyze_python_content(modification.source_code)
-                            except Exception as e:
-                                logging.error(f"Failed to analyze Python content: {str(e)}")
+            logging.debug(f"Processing file: {normalized_path}")
+            logging.debug(f"Change type: {modification.change_type}")
 
-                        file_histories[normalized_path] = FileHistory(
-                            creation_date=commit.author_date,
-                            full_path=normalized_path,
-                            basename=basename,
-                            directory=directory,
-                            last_modified_date=commit.author_date,
-                            creation_commit=commit.hash,
-                            modifications=[(commit.author_date, commit.hash)],
-                            content_history=[(commit.author_date, content)],
-                            related_files=set(),
-                            is_deleted=False,
-                            is_test=any(pattern.match(basename) for pattern in 
-                                      [re.compile(p) for p in TEST_PATTERNS['java']['file_patterns'] + 
-                                       TEST_PATTERNS['python']['file_patterns']]),
-                            is_abstract=content.is_abstract,
-                            is_utility=content.is_utility
-                        )
+            if modification.change_type == ModificationType.ADD:
+                if normalized_path not in file_histories:
+                    # Parse content based on file type
+                    content = FileContent("", [], [], [], False, False, [], [], [])
+                    if normalized_path.endswith(".java"):
+                        content = analyze_java_content(modification.source_code)
+                    elif normalized_path.endswith(".py"):
+                        content = analyze_python_content(modification.source_code)
 
-                elif modification.change_type == ModificationType.DELETE:
-                    if normalized_path in file_histories:
-                        file_histories[normalized_path].is_deleted = True
-                        file_histories[normalized_path].modifications.append(
-                            (commit.author_date, commit.hash)
-                        )
+                    file_histories[normalized_path] = FileHistory(
+                        creation_date=commit.author_date,
+                        full_path=normalized_path,
+                        basename=basename,
+                        directory=directory,
+                        last_modified_date=commit.author_date,
+                        creation_commit=commit.hash,
+                        modifications=[(commit.author_date, commit.hash)],
+                        content_history=[(commit.author_date, content)],
+                        related_files=set(),
+                        is_deleted=False,
+                        is_test=any(
+                            pattern.match(basename)
+                            for pattern in [
+                                re.compile(p)
+                                for p in TEST_PATTERNS["java"]["file_patterns"]
+                                + TEST_PATTERNS["python"]["file_patterns"]
+                            ]
+                        ),
+                        is_abstract=content.is_abstract,
+                        is_utility=content.is_utility,
+                    )
 
-                elif modification.change_type == ModificationType.MODIFY:
-                    if normalized_path in file_histories:
-                        file_histories[normalized_path].last_modified_date = commit.author_date
-                        file_histories[normalized_path].modifications.append(
-                            (commit.author_date, commit.hash)
-                        )
-                        
-                        # Update content history for modified files
-                        content = FileContent("", [], [], [], False, False, [], [], [])
-                        if normalized_path.endswith('.java'):
-                            try:
-                                content = analyze_java_content(modification.source_code)
-                            except Exception as e:
-                                logging.error(f"Failed to analyze Java content: {str(e)}")
-                        elif normalized_path.endswith('.py'):
-                            try:
-                                content = analyze_python_content(modification.source_code)
-                            except Exception as e:
-                                logging.error(f"Failed to analyze Python content: {str(e)}")
-                                
-                        file_histories[normalized_path].content_history.append(
-                            (commit.author_date, content)
-                        )
+            elif modification.change_type == ModificationType.DELETE:
+                if normalized_path in file_histories:
+                    file_histories[normalized_path].is_deleted = True
+                    file_histories[normalized_path].modifications.append(
+                        (commit.author_date, commit.hash)
+                    )
 
-        logging.info(f"Processed {commit_count} commits")
-        logging.info(f"Found {len(file_histories)} unique files")
+            elif modification.change_type == ModificationType.MODIFY:
+                if normalized_path in file_histories:
+                    file_histories[normalized_path].last_modified_date = (
+                        commit.author_date
+                    )
+                    file_histories[normalized_path].modifications.append(
+                        (commit.author_date, commit.hash)
+                    )
 
-    except Exception as e:
-        logging.error(f"Error processing repository: {str(e)}")
-        raise
+                    # Update content history for modified files
+                    content = FileContent("", [], [], [], False, False, [], [], [])
+                    if normalized_path.endswith(".java"):
+                        content = analyze_java_content(modification.source_code)
+                    elif normalized_path.endswith(".py"):
+                        content = analyze_python_content(modification.source_code)
+
+                    file_histories[normalized_path].content_history.append(
+                        (commit.author_date, content)
+                    )
 
     return file_histories, commit_graph
 
@@ -413,10 +380,6 @@ def is_related_directory(test_dir: str, source_dir: str) -> bool:
     - Custom test directory conventions
     - Monorepo structures
     """
-    logging.debug(
-        f"Analyzing directory relationship between:\nTest: {test_dir}\nSource: {source_dir}"
-    )
-
     # Normalize paths for comparison
     test_components = [c.lower() for c in test_dir.split(os.sep) if c]
     source_components = [c.lower() for c in source_dir.split(os.sep) if c]
@@ -807,30 +770,26 @@ def generate_detailed_report(results: dict, output_dir: str):
 
 def main():
     logging.info("Starting enhanced TDD analysis")
-    try:
-        # Clone repositories
-        clone_repos(REPO_URLS, CLONE_DIR)
+    # Clone repositories
+    clone_repos(REPO_URLS, CLONE_DIR)
 
-        # Analyze each repository
-        for repo_name in os.listdir(CLONE_DIR):
-            repo_path = os.path.join(CLONE_DIR, repo_name)
-            if os.path.isdir(repo_path):
-                logging.info(f"\nAnalyzing repository: {repo_name}")
+    # Analyze each repository
+    for repo_name in os.listdir(CLONE_DIR):
+        repo_path = os.path.join(CLONE_DIR, repo_name)
+        if os.path.isdir(repo_path):
+            logging.info(f"\nAnalyzing repository: {repo_name}")
 
-                # Get file histories and commit graph
-                file_histories, commit_graph = get_file_creation_dates(repo_path)
+            # Get file histories and commit graph
+            file_histories, commit_graph = get_file_creation_dates(repo_path)
 
-                # Match test and source files
-                matches = match_tests_sources(file_histories, commit_graph)
+            # Match test and source files
+            matches = match_tests_sources(file_histories, commit_graph)
 
-                # Analyze TDD patterns
-                results = analyze_tdd_patterns(matches, commit_graph)
+            # Analyze TDD patterns
+            results = analyze_tdd_patterns(matches, commit_graph)
 
-                # Generate detailed report
-                generate_detailed_report(results, OUTPUT_DIR)
-
-    except Exception as e:
-        logging.error(f"Fatal error in main execution: {str(e)}")
+            # Generate detailed report
+            generate_detailed_report(results, OUTPUT_DIR)
 
     logging.info("Analysis completed")
 
