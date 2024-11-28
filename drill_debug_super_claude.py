@@ -41,7 +41,7 @@ REPO_URLS = [
 CLONE_DIR = "apache_repos"
 
 # Directory to save analysis results
-OUTPUT_DIR = "results"
+OUTPUT_DIR = "debug_results"
 
 # Enhanced patterns for test detection
 TEST_PATTERNS = {
@@ -171,26 +171,39 @@ def analyze_java_content(content: str) -> FileContent:
         if all("static" in method.modifiers for method in node.methods):
             is_utility = True
 
-        # Analyze methods
+        # Enhanced method analysis
         for method in node.methods:
             method_names.append(method.name)
-
-            # Check for test methods
-            for annotation in method.annotations:
-                if annotation.name in TEST_PATTERNS["java"]["annotations"]:
-                    test_methods.append(method.name)
+            
+            # Check for test methods through multiple indicators
+            is_test_method = False
+            
+            # 1. Check for @Test annotation
+            if hasattr(method, 'annotations') and method.annotations:
+                for annotation in method.annotations:
+                    if annotation.name == 'Test':
+                        is_test_method = True
+                        test_methods.append(method.name)
+                        break
+            
+            # 2. Check for test method naming patterns
+            if not is_test_method and (method.name.startswith('test') or 
+                method.name.endswith('Test') or 
+                method.name.endswith('Tests')):
+                is_test_method = True
+                test_methods.append(method.name)
 
     # Check for test framework imports
     for framework in TEST_PATTERNS["java"]["frameworks"]:
         if any(framework in imp for imp in imports):
             test_frameworks.append(framework)
 
-    # Extract dependencies
-    dependencies = imports + [
-        ref[1].name
-        for ref in tree.filter(javalang.tree.ReferenceType)
-        if hasattr(ref[1], "name")
-    ]
+    # Enhanced dependency extraction
+    dependencies = set()
+    dependencies.update(imports)
+    for path, node in tree.filter(javalang.tree.ReferenceType):
+        if hasattr(node, 'name'):
+            dependencies.add(node.name)
 
     return FileContent(
         raw_content=content,
@@ -201,9 +214,8 @@ def analyze_java_content(content: str) -> FileContent:
         is_utility=is_utility,
         test_frameworks=test_frameworks,
         test_methods=test_methods,
-        dependencies=dependencies,
+        dependencies=list(dependencies)
     )
-
 
 def analyze_python_content(content: str) -> FileContent:
     tree = ast.parse(content)
@@ -620,42 +632,87 @@ def match_tests_sources(
 
 
 def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool:
-    """Check for indicators of TDD when files are committed together."""
-    # Get content at creation time
+    """
+    Analyzes test and source files for TDD practice indicators.
+    Returns True if there are strong indicators that TDD was followed.
+    """
+    # Get initial content from creation time
     test_initial = next(
-        (c for d, c in test_file.content_history if d == test_file.creation_date), None
+        (c for d, c in test_file.content_history if d == test_file.creation_date), 
+        None
     )
     source_initial = next(
         (c for d, c in source_file.content_history if d == source_file.creation_date),
-        None,
+        None
     )
 
     if not (test_initial and source_initial):
         return False
 
-    # Indicators of TDD:
-    # 1. Test file has complete test methods while source is skeletal
-    test_completeness = len(test_initial.test_methods) > 0 and all(
-        len(m) > 10 for m in test_initial.test_methods
-    )  # Non-empty test methods
+    # Enhanced test completeness check
+    test_methods_complete = False
+    if test_initial.test_methods:
+        # Get the raw content to analyze test methods
+        raw_content = test_initial.raw_content
+        
+        for method_name in test_initial.test_methods:
+            # Find method content using regex
+            method_pattern = "public.*" + re.escape(method_name) + ".*?\\{([^}]*)\\}"
+            method_matches = re.findall(method_pattern, raw_content, re.DOTALL)
+            
+            if method_matches:
+                method_content = method_matches[0]  # Get the method body
+                
+                # Check for meaningful test implementation
+                has_assertions = any(pattern in method_content.lower() 
+                                   for pattern in ["assert", "expect", "should", "verify"])
+                has_meaningful_length = len(method_content.strip()) > 50  # Require substantial test content
+                
+                if has_assertions and has_meaningful_length:
+                    test_methods_complete = True
+                    break
 
-    source_skeletal = len(source_initial.method_names) > 0 and all(
-        len(m) < 5 for m in source_initial.method_names
-    )  # Minimal implementations
+    # Enhanced source method check for skeletal implementation
+    source_methods_skeletal = False
+    if source_initial.method_names:
+        empty_or_todo_methods = 0
+        total_methods = len(source_initial.method_names)
+        
+        for method_name in source_initial.method_names:
+            method_pattern = ".*" + re.escape(method_name) + ".*?\\{([^}]*)\\}"
+            matches = re.findall(method_pattern, source_initial.raw_content, re.DOTALL)
+            
+            if matches:
+                method_body = matches[0].strip()
+                is_skeletal = (
+                    len(method_body) < 20 or  # Very short implementation
+                    "throw new UnsupportedOperationException" in method_body or
+                    "TODO" in method_body or
+                    "return null" in method_body or
+                    "return;" in method_body or
+                    not method_body  # Empty body
+                )
+                if is_skeletal:
+                    empty_or_todo_methods += 1
+        
+        # Consider source skeletal if most methods are empty/minimal
+        source_methods_skeletal = (empty_or_todo_methods / total_methods) > 0.5 if total_methods > 0 else False
 
-    # 2. Test has assertions/expectations defined
-    has_assertions = any(
-        pattern in test_initial.raw_content
-        for pattern in ["assert", "expect", "should", "verify"]
-    )
-
-    # 3. Test frameworks/annotations present in initial commit
+    # Check for test framework setup
     has_test_framework = bool(test_initial.test_frameworks)
-
-    return (test_completeness and source_skeletal) or (
-        has_assertions and has_test_framework
+    
+    # Check for testing patterns in imports
+    has_testing_imports = any(
+        "test" in imp.lower() or 
+        "junit" in imp.lower() or 
+        "assert" in imp.lower() 
+        for imp in test_initial.imports
     )
 
+    # Return true if we have strong indicators of TDD
+    return (test_methods_complete and source_methods_skeletal) or (
+        has_test_framework and has_testing_imports and test_methods_complete
+    )
 
 def indicates_repository_move(
     file1: FileHistory, file2: FileHistory, commit_graph: CommitGraph
@@ -710,6 +767,9 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
     source_to_tests = defaultdict(list)
 
     for match in matches:
+        print(match.source_file.creation_commit)
+        print(match.test_file.creation_commit)
+
         # Track relationship types
         results["relationship_types"][match.relationship_type] += 1
 
@@ -729,6 +789,10 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
             results["test_after"] += 1
         else:
             # Same commit analysis
+            print(match.test_file.creation_date)
+            print(match.source_file.creation_date)
+            print(match.source_file.basename)
+            print("Matched pair is actually tdd" + str(has_tdd_indicators(match.test_file, match.source_file)))
             if has_tdd_indicators(match.test_file, match.source_file):
                 results["same_commit_tdd"] += 1
             else:
@@ -783,7 +847,7 @@ def generate_detailed_report(results: dict, output_dir: str):
     # Create detailed CSV reports
     main_df = pd.DataFrame([results])
     main_df.to_csv(
-        os.path.join(output_dir, f"tdd_analysis_{timestamp}.csv"), index=False
+        os.path.join(output_dir, f"debug_super_tdd_analysis_{timestamp}.csv"), index=False
     )
 
     # Create relationship type distribution

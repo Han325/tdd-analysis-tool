@@ -825,7 +825,7 @@ def generate_detailed_report(results: dict, output_dir: str):
     # Create detailed CSV reports
     main_df = pd.DataFrame([results])
     main_df.to_csv(
-        os.path.join(output_dir, f"tdd_analysis_{timestamp}.csv"), index=False
+        os.path.join(output_dir, f"super_tdd_analysis_{timestamp}.csv"), index=False
     )
 
     # Create relationship type distribution
