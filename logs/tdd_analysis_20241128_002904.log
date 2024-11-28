@@ -1,0 +1,16 @@
+2024-11-28 00:29:04,738 - INFO - Starting enhanced TDD analysis
+2024-11-28 00:29:04,738 - INFO - Starting repository cloning process for 1 repos
+2024-11-28 00:29:04,738 - DEBUG - Processing repository: doris-kafka-connector
+2024-11-28 00:29:04,738 - INFO - doris-kafka-connector already exists at apache_repos/doris-kafka-connector
+2024-11-28 00:29:04,738 - INFO - 
+Analyzing repository: doris-kafka-connector
+2024-11-28 00:29:04,738 - INFO - Starting enhanced file history analysis for repo: apache_repos/doris-kafka-connector
+2024-11-28 00:29:04,744 - INFO - Analyzing git repository in /Users/han/Documents/Trials/pydriller-trials/apache_repos/doris-kafka-connector
+2024-11-28 00:29:04,745 - DEBUG - Popen(['git', 'rev-list', '--reverse', 'HEAD', '--'], cwd=/Users/han/Documents/Trials/pydriller-trials/apache_repos/doris-kafka-connector, stdin=None, shell=False, universal_newlines=False)
+2024-11-28 00:29:04,759 - DEBUG - Popen(['git', 'cat-file', '--batch'], cwd=/Users/han/Documents/Trials/pydriller-trials/apache_repos/doris-kafka-connector, stdin=<valid stream>, shell=False, universal_newlines=False)
+2024-11-28 00:29:04,771 - INFO - Commit #81e52c410e668b641d618544ff997bfe654c5b71 in 2024-03-03 17:39:08+08:00 from morningman
+2024-11-28 00:29:04,772 - DEBUG - Popen(['git', 'branch', '--contains', '81e52c410e668b641d618544ff997bfe654c5b71'], cwd=/Users/han/Documents/Trials/pydriller-trials/apache_repos/doris-kafka-connector, stdin=None, shell=False, universal_newlines=False)
+2024-11-28 00:29:04,784 - INFO - Commit #054935bc3b11f073de78c573c0a36294a5997851 in 2024-03-04 10:41:17+08:00 from DongLiang-0
+2024-11-28 00:29:04,784 - ERROR - Error processing repository: 'str' object has no attribute 'hash'
+2024-11-28 00:29:04,784 - ERROR - Fatal error in main execution: 'str' object has no attribute 'hash'
+2024-11-28 00:29:04,784 - INFO - Analysis completed
