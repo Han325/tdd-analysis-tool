@@ -21,7 +21,7 @@ if not os.path.exists('logs'):
 
 # Create timestamped log filename
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-log_file = os.path.join('logs', f'tdd_analysis_{timestamp}.log')
+log_file = os.path.join('logs', f'official_tdd_analysis_{timestamp}.log')
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +50,7 @@ OUTPUT_DIR = "results"
 TEST_PATTERNS = {
     "java": {
         "file_patterns": [
+            r"Test.*\.java$",
             r".*Test\.java$",
             r".*Tests\.java$",
             r".*TestCase\.java$",
@@ -552,6 +553,14 @@ def calculate_match_confidence(
     return min(1.0, confidence)
 
 
+def get_base_name(filename: str) -> str:
+    # Remove Test from end: UserTest.java -> User.java
+    base = re.sub(r"Test[s]?\.java$", ".java", filename)
+    # Remove Test from start: TestUser.java -> User.java 
+    base = re.sub(r"^Test(.*)\.java$", r"\1.java", base)
+    return base
+
+
 def match_tests_sources(
     file_histories: Dict[str, FileHistory], commit_graph: CommitGraph
 ) -> List[MatchedPair]:
@@ -560,46 +569,76 @@ def match_tests_sources(
 
     # Group files by their base names (without Test/Tests suffix)
     basename_groups = defaultdict(list)
+    test_files_count = 0
+    source_files_count = 0
     for path, history in file_histories.items():
         if not history.is_deleted:
-            base = re.sub(r"Test[s]?\.java$", ".java", history.basename)
+            if history.is_test:
+                test_files_count += 1
+                logging.debug(f"Found test file: {path}")
+            else:
+                source_files_count += 1
+                logging.debug(f"Found source file: {path}")
+            
+            base = get_base_name(history.basename)
             basename_groups[base].append(history)
+
+    logging.info(f"Total test files found: {test_files_count}")
+    logging.info(f"Total source files found: {source_files_count}")
+    logging.info(f"Number of base name groups: {len(basename_groups)}")
 
     # Process each group
     for base, histories in basename_groups.items():
+        logging.debug(f"\nProcessing base name group: {base}")
+
         test_files = [h for h in histories if h.is_test]
         source_files = [h for h in histories if not h.is_test]
 
-        for test_file in test_files:
+        logging.debug(f"Found {len(test_files)} test files and {len(source_files)} source files in group")
+
+        for test_file in test_files:            
+            logging.debug(f"\nAnalyzing test file: {test_file.full_path}")
             best_match = None
             best_confidence = 0.0
             relationship_type = "direct"
 
             # Check each potential source file
             for source_file in source_files:
+                logging.debug(f"Comparing with source file: {source_file.full_path}")
                 confidence = calculate_match_confidence(test_file, source_file)
+                logging.debug(f"Initial confidence score: {confidence}")
 
                 # Adjust confidence based on commit history
                 if test_file.creation_commit == source_file.creation_commit:
                     # Check for same-commit TDD patterns
                     if has_tdd_indicators(test_file, source_file):
                         confidence += 0.1
+                        logging.debug(f"Added TDD indicator bonus. New confidence: {confidence}")
+
 
                 # Check if files were moved from another repository
                 if indicates_repository_move(test_file, source_file, commit_graph):
                     confidence += 0.05
+                    logging.debug(f"Added repository move bonus. New confidence: {confidence}")
 
                 if confidence > best_confidence:
+                    logging.debug(f"New best match found with confidence {confidence}")
                     best_confidence = confidence
                     best_match = source_file
 
                     # Determine relationship type
                     if source_file.is_abstract:
                         relationship_type = "abstract"
+                        logging.debug("Relationship type: abstract")
                     elif source_file.is_utility:
                         relationship_type = "utility"
+                        logging.debug("Relationship type: utility")
+                    else:
+                        logging.debug("Relationship type: direct")
 
             if best_match and best_confidence > 0.3:  # Confidence threshold
+                logging.info(f"Match found: {test_file.full_path} -> {best_match.full_path}")
+                logging.info(f"Confidence: {best_confidence}, Type: {relationship_type}")
                 matches.append(
                     MatchedPair(
                         test_file=test_file,
@@ -609,8 +648,15 @@ def match_tests_sources(
                         relationship_type=relationship_type,
                     )
                 )
+            else:
+                logging.debug(f"No match found for test file: {test_file.full_path}")
+                if best_match:
+                    logging.debug(f"Best candidate was {best_match.full_path} with insufficient confidence {best_confidence}")
 
+    
+    logging.info(f"Total matches found: {len(matches)}")
     return matches
+
 
 
 def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool:
@@ -623,6 +669,8 @@ def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool
         (c for d, c in source_file.content_history if d == source_file.creation_date),
         None,
     )
+
+    print(test_initial, source_initial)
 
     if not (test_initial and source_initial):
         return False

@@ -8,7 +8,7 @@ To run the pydriller script, setup a virtual environment first (This example use
 virtualenv venv 
 ```
 
-Activate the existing the virtual environment using this command (For macOS/linux)
+Activate the existing the virtual environment using this command, this is for virtualenv only (For macOS/linux)
 
 ```
 . venv/bin/activate  
@@ -18,7 +18,7 @@ Activate the existing the virtual environment using this command (For macOS/linu
 Afterwards pip install the dependencies:
 
 ```
-pip3 install -r requirements.txt 
+pip install -r requirements.txt 
 ```
 
 Finally run the command:
