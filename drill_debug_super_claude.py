@@ -15,6 +15,13 @@ from javalang.parser import Parser
 from javalang.tree import MethodDeclaration, ClassDeclaration
 import networkx as nx
 
+# TODO: In file history, analyze content if the file is a business logic file
+# In matched pairs, calculate ratio to check the number of matched file match the number of logic files
+# enhance the matching function to go through test files that has source class import even though 
+# test file naming convention is not following pattern.
+# 
+
+
 # Create logs directory if it doesn't exist
 if not os.path.exists("logs"):
     os.makedirs("logs")
@@ -490,7 +497,7 @@ def calculate_match_confidence(
     test_file: FileHistory, source_file: FileHistory
 ) -> float:
     confidence = 0.0
-
+    # TODO: Besides checking naming, directory, and imports source class statements
     # Base confidence from naming convention
     if test_file.basename.replace("Test", "") == source_file.basename:
         confidence += 0.4
@@ -666,6 +673,7 @@ def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool
                 # Check for meaningful test implementation
                 has_assertions = any(pattern in method_content.lower() 
                                    for pattern in ["assert", "expect", "should", "verify"])
+                # TODO: Justify why this is the number
                 has_meaningful_length = len(method_content.strip()) > 50  # Require substantial test content
                 
                 if has_assertions and has_meaningful_length:
@@ -678,6 +686,7 @@ def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool
         empty_or_todo_methods = 0
         total_methods = len(source_initial.method_names)
         
+        # TODO: Justify why this is skeletal.
         for method_name in source_initial.method_names:
             method_pattern = ".*" + re.escape(method_name) + ".*?\\{([^}]*)\\}"
             matches = re.findall(method_pattern, source_initial.raw_content, re.DOTALL)
@@ -714,6 +723,7 @@ def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool
         has_test_framework and has_testing_imports and test_methods_complete
     )
 
+# TODO: Figure what the fuck this is
 def indicates_repository_move(
     file1: FileHistory, file2: FileHistory, commit_graph: CommitGraph
 ) -> bool:
@@ -887,6 +897,7 @@ def main():
             logging.info(f"\nAnalyzing repository: {repo_name}")
 
             # Get file histories and commit graph
+            # TODO: Figure what is the commit graph
             file_histories, commit_graph = get_file_creation_dates(repo_path)
 
             # Match test and source files
@@ -903,3 +914,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
