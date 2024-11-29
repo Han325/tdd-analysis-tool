@@ -69,12 +69,7 @@ TEST_PATTERNS = {
             "org.powermock",
         ],
         "annotations": ["@Test", "@Before", "@After", "@BeforeClass", "@AfterClass"],
-    },
-    "python": {
-        "file_patterns": [r"test_.*\.py$", r".*_test\.py$", r".*_tests\.py$"],
-        "frameworks": ["unittest", "pytest", "nose", "doctest"],
-        "decorators": ["@pytest.fixture", "@pytest.mark.parametrize"],
-    },
+    }
 }
 
 
@@ -224,68 +219,6 @@ def analyze_java_content(content: str) -> FileContent:
         dependencies=list(dependencies)
     )
 
-def analyze_python_content(content: str) -> FileContent:
-    tree = ast.parse(content)
-    imports = []
-    class_names = []
-    method_names = []
-    is_abstract = False
-    is_utility = True  # Assume utility until we find instance methods
-    test_frameworks = []
-    test_methods = []
-    dependencies = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imports.extend(name.name for name in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            imports.append(f"{node.module}.{name.name}" for name in node.names)
-        elif isinstance(node, ast.ClassDef):
-            class_names.append(node.name)
-
-            # Check for abstract base classes
-            if any(
-                base.id == "ABC" for base in node.bases if isinstance(base, ast.Name)
-            ):
-                is_abstract = True
-
-            # Check methods
-            for child in node.body:
-                if isinstance(child, ast.FunctionDef):
-                    method_names.append(child.name)
-
-                    # Check for instance methods (non-static)
-                    if child.args.args and child.args.args[0].arg == "self":
-                        is_utility = False
-
-                    # Check for test methods
-                    if child.name.startswith("test_"):
-                        test_methods.append(child.name)
-
-                    # Check for test decorators
-                    for decorator in child.decorator_list:
-                        if isinstance(decorator, ast.Name):
-                            decorator_name = f"@{decorator.id}"
-                            if decorator_name in TEST_PATTERNS["python"]["decorators"]:
-                                test_methods.append(child.name)
-
-    # Check for test framework imports
-    for framework in TEST_PATTERNS["python"]["frameworks"]:
-        if framework in imports:
-            test_frameworks.append(framework)
-
-    return FileContent(
-        raw_content=content,
-        imports=imports,
-        class_names=class_names,
-        method_names=method_names,
-        is_abstract=is_abstract,
-        is_utility=is_utility,
-        test_frameworks=test_frameworks,
-        test_methods=test_methods,
-        dependencies=imports,
-    )
-
 
 def get_file_creation_dates(
     repo_path: str,
@@ -331,8 +264,6 @@ def get_file_creation_dates(
                     content = FileContent("", [], [], [], False, False, [], [], [])
                     if normalized_path.endswith(".java"):
                         content = analyze_java_content(modification.source_code)
-                    elif normalized_path.endswith(".py"):
-                        content = analyze_python_content(modification.source_code)
 
                     file_histories[normalized_path] = FileHistory(
                         creation_date=commit.author_date,
@@ -350,7 +281,6 @@ def get_file_creation_dates(
                             for pattern in [
                                 re.compile(p)
                                 for p in TEST_PATTERNS["java"]["file_patterns"]
-                                + TEST_PATTERNS["python"]["file_patterns"]
                             ]
                         ),
                         is_abstract=content.is_abstract,
@@ -377,8 +307,6 @@ def get_file_creation_dates(
                     content = FileContent("", [], [], [], False, False, [], [], [])
                     if normalized_path.endswith(".java"):
                         content = analyze_java_content(modification.source_code)
-                    elif normalized_path.endswith(".py"):
-                        content = analyze_python_content(modification.source_code)
 
                     file_histories[normalized_path].content_history.append(
                         (commit.author_date, content)
@@ -415,7 +343,7 @@ def is_related_directory(test_dir: str, source_dir: str) -> bool:
         ("integration-test", "main"),
         ("integration-tests", "main"),
         ("it", "main"),
-        # Python patterns
+        # Python patterns # keeping this just in case some java projects use this
         ("tests", ""),  # Python package with tests at root
         ("test", ""),
         # Custom but common patterns
