@@ -37,7 +37,7 @@ For Windows:
 ```
 setup.bat
 ```
-Once the server is running, you may proceed to run the scripts:
+Once the server is running, you may proceed to run the scripts **on another terminal**:
 
 Debugging run, script with less try/catch blocks for faster fault localization:
 ```
