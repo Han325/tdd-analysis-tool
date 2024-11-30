@@ -15,13 +15,6 @@ from javalang.parser import Parser
 from javalang.tree import MethodDeclaration, ClassDeclaration
 import networkx as nx
 
-# TODO: In file history, analyze content if the file is a business logic file
-# In matched pairs, calculate ratio to check the number of matched file match the number of logic files
-# enhance the matching function to go through test files that has source class import even though 
-# test file naming convention is not following pattern.
-# 
-
-
 # Create logs directory if it doesn't exist
 if not os.path.exists("logs"):
     os.makedirs("logs")
@@ -80,6 +73,7 @@ TEST_PATTERNS = {
 
 @dataclass
 class FileContent:
+    """Represents parsed content of a file at a specific point in time"""
     raw_content: str
     imports: List[str]
     class_names: List[str]
@@ -89,10 +83,16 @@ class FileContent:
     test_frameworks: List[str]
     test_methods: List[str]
     dependencies: List[str]
+    
+    @property
+    def is_test(self) -> bool:
+        """Determine if file is a test based on content analysis"""
+        return bool(self.test_frameworks and self.test_methods and not self.is_abstract)
 
 
 @dataclass
 class FileHistory:
+    """Tracks a file's history through version control"""
     creation_date: datetime
     full_path: str
     basename: str
@@ -103,10 +103,26 @@ class FileHistory:
     content_history: List[Tuple[datetime, FileContent]]
     related_files: Set[str]  # Set of related file paths
     is_deleted: bool = False
-    is_test: bool = False
-    is_abstract: bool = False
-    is_utility: bool = False
 
+    @property
+    def latest_content(self) -> Optional[FileContent]:
+        """Get the most recent content version"""
+        return self.content_history[-1][1] if self.content_history else None
+
+    @property
+    def is_test(self) -> bool:
+        """Determine if file is a test based on latest content"""
+        return bool(self.latest_content and self.latest_content.is_test)
+    
+    @property
+    def is_abstract(self) -> bool:
+        """Get abstract status from latest content"""
+        return bool(self.latest_content and self.latest_content.is_abstract)
+    
+    @property
+    def is_utility(self) -> bool:
+        """Get utility status from latest content"""
+        return bool(self.latest_content and self.latest_content.is_utility)
 
 class MatchedPair(NamedTuple):
     test_file: FileHistory
@@ -166,44 +182,46 @@ def analyze_java_content(content: str) -> FileContent:
     test_frameworks = []
     test_methods = []
     dependencies = []
+    
+    # First check if this is a real test class by looking for test framework imports/annotations
+    has_test_framework = any(framework in imp for imp in imports for framework in TEST_PATTERNS["java"]["frameworks"])
+    has_test_annotation = False
 
     for path, node in tree.filter(ClassDeclaration):
         class_names.append(node.name)
 
-        # Check for abstract class
+        # Check for abstract modifier
         if "abstract" in node.modifiers:
             is_abstract = True
 
-        # Check for utility class (all static methods)
         if all("static" in method.modifiers for method in node.methods):
             is_utility = True
 
-        # Enhanced method analysis
-        for method in node.methods:
-            method_names.append(method.name)
-            
-            # Check for test methods through multiple indicators
-            is_test_method = False
-            
-            # 1. Check for @Test annotation
-            if hasattr(method, 'annotations') and method.annotations:
-                for annotation in method.annotations:
-                    if annotation.name == 'Test':
-                        is_test_method = True
-                        test_methods.append(method.name)
-                        break
-            
-            # 2. Check for test method naming patterns
-            if not is_test_method and (method.name.startswith('test') or 
-                method.name.endswith('Test') or 
-                method.name.endswith('Tests')):
-                is_test_method = True
-                test_methods.append(method.name)
+        # Look for @Test annotations at class level
+        if hasattr(node, 'annotations'):
+            for annotation in node.annotations:
+                if annotation.name == 'Test':
+                    has_test_annotation = True
 
-    # Check for test framework imports
-    for framework in TEST_PATTERNS["java"]["frameworks"]:
-        if any(framework in imp for imp in imports):
-            test_frameworks.append(framework)
+        # Only look for test methods if class is not abstract
+        if not is_abstract:
+            for method in node.methods:
+                method_names.append(method.name)
+                
+                # Only consider method as test if class uses test framework
+                if has_test_framework:
+                    if hasattr(method, 'annotations') and method.annotations:
+                        for annotation in method.annotations:
+                            if annotation.name == 'Test':
+                                has_test_annotation = True
+                                test_methods.append(method.name)
+                                break
+
+    # Only include test frameworks if actually test class and not abstract
+    if has_test_framework and has_test_annotation and not is_abstract:
+        for framework in TEST_PATTERNS["java"]["frameworks"]:
+            if any(framework in imp for imp in imports):
+                test_frameworks.append(framework)
 
     # Enhanced dependency extraction
     dependencies = set()
@@ -344,19 +362,8 @@ def get_file_creation_dates(
                         modifications=[(commit.author_date, commit.hash)],
                         content_history=[(commit.author_date, content)],
                         related_files=set(),
-                        is_deleted=False,
-                        is_test=any(
-                            pattern.match(basename)
-                            for pattern in [
-                                re.compile(p)
-                                for p in TEST_PATTERNS["java"]["file_patterns"]
-                                + TEST_PATTERNS["python"]["file_patterns"]
-                            ]
-                        ),
-                        is_abstract=content.is_abstract,
-                        is_utility=content.is_utility,
+                        is_deleted=False
                     )
-
             elif modification.change_type == ModificationType.DELETE:
                 if normalized_path in file_histories:
                     file_histories[normalized_path].is_deleted = True
@@ -497,8 +504,6 @@ def calculate_match_confidence(
     test_file: FileHistory, source_file: FileHistory
 ) -> float:
     confidence = 0.0
-    # TODO: Besides checking naming, directory, and imports source class statements
-    # Base confidence from naming convention
     if test_file.basename.replace("Test", "") == source_file.basename:
         confidence += 0.4
 
@@ -541,19 +546,14 @@ def get_base_name(filename: str) -> str:
     base = re.sub(r"^Test(.*)\.java$", r"\1.java", base)
     return base
 
-def match_tests_sources(
-    file_histories: Dict[str, FileHistory], commit_graph: CommitGraph
-) -> List[MatchedPair]:
-    logging.info("Starting enhanced test-source file matching process")
+def match_tests_sources(file_histories: Dict[str, FileHistory], commit_graph: CommitGraph) -> List[MatchedPair]:
+    logging.info("Starting initial test-source file matching process")
     matches = []
 
-    # Group files by their base names (without Test/Tests suffix)
     basename_groups = defaultdict(list)
     test_files_count = 0
     source_files_count = 0
     
-    # Log all test files found
-    logging.info("Identifying test and source files...")
     for path, history in file_histories.items():
         if not history.is_deleted:
             if history.is_test:
@@ -562,20 +562,17 @@ def match_tests_sources(
             else:
                 source_files_count += 1
                 logging.debug(f"Found source file: {path}")
-            
             base = get_base_name(history.basename)
             basename_groups[base].append(history)
 
     logging.info(f"Total test files found: {test_files_count}")
     logging.info(f"Total source files found: {source_files_count}")
-    logging.info(f"Number of base name groups: {len(basename_groups)}")
-
-    # Process each group
+    
+    # Original matching logic (unchanged)
     for base, histories in basename_groups.items():
         logging.debug(f"\nProcessing base name group: {base}")
         test_files = [h for h in histories if h.is_test]
         source_files = [h for h in histories if not h.is_test]
-        
         logging.debug(f"Found {len(test_files)} test files and {len(source_files)} source files in group")
 
         for test_file in test_files:
@@ -629,12 +626,44 @@ def match_tests_sources(
                         relationship_type=relationship_type,
                     )
                 )
-            else:
-                logging.debug(f"No match found for test file: {test_file.full_path}")
-                if best_match:
-                    logging.debug(f"Best candidate was {best_match.full_path} with insufficient confidence {best_confidence}")
+   
 
-    logging.info(f"Total matches found: {len(matches)}")
+    # Second pass: Check remaining unmatched test files using imports
+    matched_test_paths = {match.test_file.full_path for match in matches}
+    all_test_files = [h for h in file_histories.values() if h.is_test and not h.is_deleted]
+    remaining_test_files = [f for f in all_test_files if f.full_path not in matched_test_paths]
+    
+    if remaining_test_files:
+        logging.info(f"Starting import-based matching for {len(remaining_test_files)} unmatched test files")
+        source_files = [h for h in file_histories.values() if not h.is_test and not h.is_deleted]
+        
+        for test_file in remaining_test_files:
+            if test_file.content_history:
+                latest_test_content = test_file.content_history[-1][1]
+                best_match = None
+                best_confidence = 0.0
+                
+                for source_file in source_files:
+                    source_class = source_file.basename[:-5]
+                    for import_stmt in latest_test_content.imports:
+                        if source_class == import_stmt.split('.')[-1]:
+                            confidence = 0.5
+                            if confidence > best_confidence:
+                                best_confidence = confidence
+                                best_match = source_file
+                
+                if best_match:
+                    logging.info(f"Import-based match found: {test_file.full_path} -> {best_match.full_path}")
+                    matches.append(
+                        MatchedPair(
+                            test_file=test_file,
+                            source_file=best_match,
+                            directory_match=test_file.directory == best_match.directory,
+                            confidence_score=best_confidence,
+                            relationship_type="direct"
+                        )
+                    )
+
     return matches
 
 
@@ -819,14 +848,11 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
             results["repository_moves"] += 1
 
         # Track test framework usage
-        latest_test_content = (
-            match.test_file.content_history[-1][1]
-            if match.test_file.content_history
-            else None
-        )
-        if latest_test_content:
-            for framework in latest_test_content.test_frameworks:
-                results["framework_distribution"][framework] += 1
+      # Update this block:
+    latest_test_content = match.test_file.latest_content
+    if latest_test_content:
+        for framework in latest_test_content.test_frameworks:
+            results["framework_distribution"][framework] += 1
 
     # Analyze multiple test coverage
     for source_path, test_files in source_to_tests.items():
