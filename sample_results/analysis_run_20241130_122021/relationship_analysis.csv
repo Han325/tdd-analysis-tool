@@ -1,0 +1,11 @@
+test_file,source_file,type,confidence,directory_match
+TestDorisOptions.java,DorisOptions.java,direct,0.7,False
+TestDorisSinkConnectorConfig.java,DorisSinkConnectorConfig.java,utility,0.7,False
+TestRecordService.java,RecordService.java,direct,0.9999999999999999,False
+ConfigCheckUtilsTest.java,ConfigCheckUtils.java,utility,0.7999999999999999,False
+TestCopyIntoWriter.java,CopyIntoWriter.java,direct,0.9999999999999999,False
+TestRecordBuffer.java,RecordBuffer.java,direct,0.8999999999999999,False
+TestStreamLoadWriter.java,StreamLoadWriter.java,direct,0.9999999999999999,False
+TestCopyLoad.java,CopyLoad.java,direct,0.8,False
+DorisAvroConverterTest.java,DorisAvroConverter.java,direct,0.7999999999999999,False
+StringMsgE2ETest.java,DorisOptions.java,direct,0.5,False

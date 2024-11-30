@@ -1,0 +1,11 @@
+test_file,frameworks,test_methods
+TestDorisOptions.java,['org.junit'],2
+TestDorisSinkConnectorConfig.java,['org.junit'],36
+TestRecordService.java,"['org.junit', 'org.mockito']",8
+ConfigCheckUtilsTest.java,['org.junit'],3
+TestCopyIntoWriter.java,"['org.junit', 'org.mockito']",4
+TestRecordBuffer.java,['org.junit'],1
+TestStreamLoadWriter.java,"['org.junit', 'org.mockito']",6
+TestCopyLoad.java,"['org.junit', 'org.mockito']",1
+DorisAvroConverterTest.java,['org.junit'],2
+StringMsgE2ETest.java,['org.junit'],5
