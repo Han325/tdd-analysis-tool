@@ -4,3 +4,8 @@ results
 debug_results
 .DS_Store
 logs
+
+# Java compiled files
+java/build/
+*.class
+
