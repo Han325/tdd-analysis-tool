@@ -709,9 +709,8 @@ def indicates_repository_move(
                     return bool(branch_point1 or branch_point2)
     return False
 
-
 def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) -> dict:
-    """Enhanced TDD pattern analysis with detailed categorization."""
+    """Enhanced TDD pattern analysis with more detailed reporting"""
     logging.info("Starting comprehensive TDD pattern analysis")
 
     results = {
@@ -721,30 +720,59 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
         "test_after": 0,
         "same_commit_tdd": 0,
         "same_commit_unclear": 0,
-        "relationship_types": defaultdict(int),
-        "confidence_distribution": defaultdict(int),
-        "multi_test_coverage": 0,  # Cases where multiple tests cover one source
-        "abstract_base_coverage": 0,  # Tests covering abstract classes
-        "utility_class_coverage": 0,  # Tests covering utility classes
-        "framework_distribution": defaultdict(int),
+        "relationship_details": [],  # New: detailed relationship info
+        "relationship_types": defaultdict(int),  # Fixed: Initialize defaultdict
+        "confidence_details": [],    # New: detailed confidence info
+        "confidence_distribution": defaultdict(int),  # Added: Initialize defaultdict
+        "multi_test_coverage": 0,
+        "abstract_base_coverage": 0,
+        "utility_class_coverage": 0,
+        "framework_details": [],     # New: detailed framework info
         "repository_moves": 0,
         "squashed_commits": 0,
     }
 
     # Track source files with multiple tests
     source_to_tests = defaultdict(list)
+    
+    # Track frameworks across all test files
+    all_frameworks = set()
 
     for match in matches:
-        print(match.source_file.creation_commit)
-        print(match.test_file.creation_commit)
+        # Store detailed relationship info
+        relationship_detail = {
+            "test_file": match.test_file.basename,
+            "source_file": match.source_file.basename,
+            "type": match.relationship_type,
+            "confidence": match.confidence_score,
+            "directory_match": match.directory_match
+        }
+        results["relationship_details"].append(relationship_detail)
+
+        # Store detailed confidence info
+        confidence_detail = {
+            "test_file": match.test_file.basename,
+            "source_file": match.source_file.basename,
+            "confidence_score": match.confidence_score,
+            "factors": []  # Will store reasons for confidence score
+        }
+        
+        # Analyze confidence factors
+        if match.directory_match:
+            confidence_detail["factors"].append("Same directory")
+        if match.test_file.basename.replace("Test", "") == match.source_file.basename:
+            confidence_detail["factors"].append("Direct name match")
+        latest_test_content = match.test_file.latest_content
+        if latest_test_content and match.source_file.basename[:-5] in " ".join(latest_test_content.raw_content.split()):
+            confidence_detail["factors"].append("Source class referenced in test")
+        
+        results["confidence_details"].append(confidence_detail)
 
         # Track relationship types
         results["relationship_types"][match.relationship_type] += 1
 
         # Track confidence distribution
-        confidence_bucket = (
-            round(match.confidence_score * 10) / 10
-        )  # Round to nearest 0.1
+        confidence_bucket = round(match.confidence_score * 10) / 10
         results["confidence_distribution"][confidence_bucket] += 1
 
         # Add to source-test mapping
@@ -756,89 +784,113 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
         elif match.test_file.creation_date > match.source_file.creation_date:
             results["test_after"] += 1
         else:
-            # Same commit analysis
-            print(match.test_file.creation_date)
-            print(match.source_file.creation_date)
-            print(match.source_file.basename)
-            print("Matched pair is actually tdd" + str(has_tdd_indicators(match.test_file, match.source_file)))
             if has_tdd_indicators(match.test_file, match.source_file):
                 results["same_commit_tdd"] += 1
             else:
                 results["same_commit_unclear"] += 1
 
-        # Check for special cases
-        if match.source_file.is_abstract:
-            results["abstract_base_coverage"] += 1
-        if match.source_file.is_utility:
-            results["utility_class_coverage"] += 1
+        # Track frameworks used
+        latest_test_content = match.test_file.latest_content
+        if latest_test_content:
+            all_frameworks.update(latest_test_content.test_frameworks)
+            
+            # Store detailed framework info
+            framework_detail = {
+                "test_file": match.test_file.basename,
+                "frameworks": latest_test_content.test_frameworks,
+                "test_methods": len(latest_test_content.test_methods)
+            }
+            results["framework_details"].append(framework_detail)
 
-        # Check for repository moves
-        if indicates_repository_move(match.test_file, match.source_file, commit_graph):
-            results["repository_moves"] += 1
-
-        # Track test framework usage
-      # Update this block:
-    latest_test_content = match.test_file.latest_content
-    if latest_test_content:
-        for framework in latest_test_content.test_frameworks:
-            results["framework_distribution"][framework] += 1
-
-    # Analyze multiple test coverage
-    for source_path, test_files in source_to_tests.items():
-        if len(test_files) > 1:
-            results["multi_test_coverage"] += 1
-
-    # Calculate TDD adoption metrics
-    total_determinable = (
-        results["test_first"] + results["test_after"] + results["same_commit_tdd"]
-    )
-
+    # Calculate final metrics
+    total_determinable = results["test_first"] + results["test_after"] + results["same_commit_tdd"]
     if total_determinable > 0:
-        results["tdd_adoption_rate"] = (
-            results["test_first"] + results["same_commit_tdd"]
-        ) / total_determinable
+        results["tdd_adoption_rate"] = (results["test_first"] + results["same_commit_tdd"]) / total_determinable
+
+     # Convert defaultdicts to regular dicts for cleaner logging
+    simple_results = {
+        "total_matches": results["total_matches"],
+        "same_directory_matches": results["same_directory_matches"],
+        "test_first": results["test_first"],
+        "test_after": results["test_after"],
+        "same_commit_tdd": results["same_commit_tdd"],
+        "same_commit_unclear": results["same_commit_unclear"],
+        "relationship_types": dict(results["relationship_types"]),
+        "confidence_distribution": dict(results["confidence_distribution"]),
+        "multi_test_coverage": results["multi_test_coverage"],
+        "abstract_base_coverage": results["abstract_base_coverage"],
+        "utility_class_coverage": results["utility_class_coverage"],
+        "repository_moves": results["repository_moves"],
+        "squashed_commits": results["squashed_commits"]
+    }
+    if "tdd_adoption_rate" in results:
+        simple_results["tdd_adoption_rate"] = results["tdd_adoption_rate"]
 
     logging.info("Analysis Results:")
-    for key, value in results.items():
+    for key, value in simple_results.items():
         logging.info(f"{key}: {value}")
 
     return results
 
-
 def generate_detailed_report(results: dict, output_dir: str):
-    """Generate a detailed analysis report with visualizations."""
+    """Generate enhanced detailed analysis report in a timestamped folder"""
+    # Create timestamp for the run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create a new directory for this analysis run
+    run_dir = os.path.join(output_dir, f"analysis_run_{timestamp}")
+    os.makedirs(run_dir, exist_ok=True)
+    
+    logging.info(f"Generating reports in directory: {run_dir}")
 
-    # Create detailed CSV reports
-    main_df = pd.DataFrame([results])
-    main_df.to_csv(
-        os.path.join(output_dir, f"debug_super_tdd_analysis_{timestamp}.csv"), index=False
+    # Create main results CSV
+    main_df = pd.DataFrame([{k: v for k, v in results.items() 
+                            if not isinstance(v, (list, dict, defaultdict))}])
+    main_df.to_csv(os.path.join(run_dir, "tdd_analysis_summary.csv"), 
+                  index=False)
+
+    # Create detailed relationship analysis CSV
+    relationship_df = pd.DataFrame(results["relationship_details"])
+    relationship_df.to_csv(
+        os.path.join(run_dir, "relationship_analysis.csv"),
+        index=False
     )
 
-    # Create relationship type distribution
-    pd.DataFrame(
-        results["relationship_types"].items(), columns=["type", "count"]
-    ).to_csv(
-        os.path.join(output_dir, f"relationship_types_{timestamp}.csv"), index=False
+    # Create detailed confidence analysis CSV
+    confidence_df = pd.DataFrame(results["confidence_details"])
+    confidence_df.to_csv(
+        os.path.join(run_dir, "confidence_analysis.csv"),
+        index=False
     )
 
-    # Create framework distribution
-    pd.DataFrame(
-        results["framework_distribution"].items(), columns=["framework", "count"]
-    ).to_csv(
-        os.path.join(output_dir, f"framework_distribution_{timestamp}.csv"), index=False
+    # Create detailed framework analysis CSV
+    framework_df = pd.DataFrame(results["framework_details"])
+    framework_df.to_csv(
+        os.path.join(run_dir, "framework_analysis.csv"),
+        index=False
     )
 
-    # Create confidence distribution
-    pd.DataFrame(
-        results["confidence_distribution"].items(), columns=["confidence", "count"]
-    ).to_csv(
-        os.path.join(output_dir, f"confidence_distribution_{timestamp}.csv"),
-        index=False,
-    )
-
-    logging.info(f"Detailed reports generated in {output_dir}")
-
+    logging.info(f"Enhanced reports generated in {run_dir}")
+    
+    # # Log summary statistics (For manual inspection)
+    # logging.info("\nDetailed Analysis Summary:")
+    # logging.info("Test Framework Usage:")
+    # for framework_detail in results["framework_details"]:
+    #     logging.info(f"  {framework_detail['test_file']}:")
+    #     logging.info(f"    Frameworks: {', '.join(framework_detail['frameworks'])}")
+    #     logging.info(f"    Test Methods: {framework_detail['test_methods']}")
+    
+    # logging.info("\nRelationship Analysis:")
+    # for rel_detail in results["relationship_details"]:
+    #     logging.info(f"  {rel_detail['test_file']} -> {rel_detail['source_file']}:")
+    #     logging.info(f"    Type: {rel_detail['type']}")
+    #     logging.info(f"    Confidence: {rel_detail['confidence']:.2f}")
+        
+    # logging.info("\nConfidence Score Breakdown:")
+    # for conf_detail in results["confidence_details"]:
+    #     logging.info(f"  {conf_detail['test_file']} -> {conf_detail['source_file']}:")
+    #     logging.info(f"    Score: {conf_detail['confidence_score']:.2f}")
+    #     logging.info(f"    Factors: {', '.join(conf_detail['factors'])}")
 
 def main():
     logging.info("Starting enhanced TDD analysis")
