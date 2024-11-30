@@ -23,14 +23,14 @@ if not os.path.exists("logs"):
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 log_file = os.path.join("logs", f"tdd_analysis_{timestamp}.log")
 
-# Configure logging (DISABLED)
+# Configure logging
 logging.basicConfig(
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.FileHandler(log_file), logging.StreamHandler()],
 )
 
-# List of repository URLs
+# List of repository URLs (Replace with your own urls)
 REPO_URLS = [
     # "https://github.com/apache/bigtop-manager",
     # "https://github.com/apache/commons-csv",
@@ -41,7 +41,7 @@ REPO_URLS = [
 CLONE_DIR = "apache_repos"
 
 # Directory to save analysis results
-OUTPUT_DIR = "debug_results"
+OUTPUT_DIR = "results"
 
 # Enhanced patterns for test detection
 TEST_PATTERNS = {
@@ -117,8 +117,8 @@ class FileHistory:
     @property
     def is_utility(self) -> bool:
         """Get utility status from latest content"""
-        return bool(self.latest_content and self.latest_content.is_utility)
-
+        return bool(self.latest_content and self.latest_content.is_utility)   
+     
 class MatchedPair(NamedTuple):
     test_file: FileHistory
     source_file: FileHistory
@@ -150,16 +150,21 @@ class CommitGraph:
 
 
 def clone_repos(repo_urls, clone_dir):
+    logging.info(f"Starting repository cloning process for {len(repo_urls)} repos")
     if not os.path.exists(clone_dir):
         os.makedirs(clone_dir)
+        logging.debug(f"Created clone directory: {clone_dir}")
 
     for url in repo_urls:
         repo_name = url.split("/")[-1].replace(".git", "")
         repo_path = os.path.join(clone_dir, repo_name)
+        logging.debug(f"Processing repository: {repo_name}")
 
         if not os.path.exists(repo_path):
+            logging.info(f"Cloning {repo_name}...")
             try:
                 Repo.clone_from(url, repo_path)
+                logging.info(f"Successfully cloned {repo_name}")
             except Exception as e:
                 logging.error(f"Failed to clone {repo_name}: {str(e)}")
         else:
@@ -237,88 +242,100 @@ def analyze_java_content(content: str) -> FileContent:
         dependencies=list(dependencies)
     )
 
-
 def get_file_creation_dates(
     repo_path: str,
 ) -> Tuple[Dict[str, FileHistory], CommitGraph]:
+    logging.info(f"Starting file history analysis for repo: {repo_path}")
     file_histories: Dict[str, FileHistory] = {}
     commit_graph = CommitGraph()
 
-    repo = Repo(repo_path)
-    default_branch = repo.active_branch.name
+    try:
+        repo = Repo(repo_path)
+        default_branch = repo.active_branch.name
+        logging.debug(f"Using default branch: {default_branch}")
 
-    commit_count = 0
-    for commit in Repository(
-        repo_path, only_in_branch=default_branch
-    ).traverse_commits():
-        commit_count += 1
+        commit_count = 0
+        for commit in Repository(
+            repo_path, only_in_branch=default_branch
+        ).traverse_commits():
+            commit_count += 1
 
-        # Add commit to graph
-        if isinstance(commit, Commit):
-            commit_graph.add_commit(
-                commit.hash, [p.hash for p in commit.parents], default_branch
+            # Add commit to graph
+            if isinstance(commit, Commit):
+                commit_graph.add_commit(
+                    commit.hash, [p.hash for p in commit.parents], default_branch
+                )
+
+            logging.debug(
+                f"Processing commit {commit.hash[:8]} from {commit.author_date}"
             )
 
-        logging.debug(f"Processing commit {commit.hash[:8]} from {commit.author_date}")
-
-        for modification in commit.modified_files:
-            current_path = modification.new_path or modification.old_path
-            if not current_path:
-                logging.warning(
-                    f"Skipping modification with no path in commit {commit.hash[:8]}"
-                )
-                continue
-
-            normalized_path = os.path.normpath(current_path)
-            basename = os.path.basename(normalized_path)
-            directory = os.path.dirname(normalized_path)
-
-            logging.debug(f"Processing file: {normalized_path}")
-            logging.debug(f"Change type: {modification.change_type}")
-
-            if modification.change_type == ModificationType.ADD:
-                if normalized_path not in file_histories:
-                    # Parse content based on file type
-                    content = FileContent("", [], [], [], False, False, [], [], [])
-                    if normalized_path.endswith(".java"):
-                        content = analyze_java_content(modification.source_code)
-
-                    file_histories[normalized_path] = FileHistory(
-                        creation_date=commit.author_date,
-                        full_path=normalized_path,
-                        basename=basename,
-                        directory=directory,
-                        last_modified_date=commit.author_date,
-                        creation_commit=commit.hash,
-                        modifications=[(commit.author_date, commit.hash)],
-                        content_history=[(commit.author_date, content)],
-                        related_files=set(),
-                        is_deleted=False
+            for modification in commit.modified_files:
+                current_path = modification.new_path or modification.old_path
+                if not current_path:
+                    logging.warning(
+                        f"Skipping modification with no path in commit {commit.hash[:8]}"
                     )
-            elif modification.change_type == ModificationType.DELETE:
-                if normalized_path in file_histories:
-                    file_histories[normalized_path].is_deleted = True
-                    file_histories[normalized_path].modifications.append(
-                        (commit.author_date, commit.hash)
-                    )
+                    continue
 
-            elif modification.change_type == ModificationType.MODIFY:
-                if normalized_path in file_histories:
-                    file_histories[normalized_path].last_modified_date = (
-                        commit.author_date
-                    )
-                    file_histories[normalized_path].modifications.append(
-                        (commit.author_date, commit.hash)
-                    )
+                normalized_path = os.path.normpath(current_path)
+                basename = os.path.basename(normalized_path)
+                directory = os.path.dirname(normalized_path)
 
-                    # Update content history for modified files
-                    content = FileContent("", [], [], [], False, False, [], [], [])
-                    if normalized_path.endswith(".java"):
-                        content = analyze_java_content(modification.source_code)
+                logging.debug(f"Processing file: {normalized_path}")
+                logging.debug(f"Change type: {modification.change_type}")
 
-                    file_histories[normalized_path].content_history.append(
-                        (commit.author_date, content)
-                    )
+                if modification.change_type == ModificationType.ADD:
+                    if normalized_path not in file_histories:
+                        # Parse content based on file type
+                        content = FileContent("", [], [], [], False, False, [], [], [])
+                        if normalized_path.endswith(".java"):
+                            content = analyze_java_content(modification.source_code)
+
+                        file_histories[normalized_path] = FileHistory(
+                            creation_date=commit.author_date,
+                            full_path=normalized_path,
+                            basename=basename,
+                            directory=directory,
+                            last_modified_date=commit.author_date,
+                            creation_commit=commit.hash,
+                            modifications=[(commit.author_date, commit.hash)],
+                            content_history=[(commit.author_date, content)],
+                            related_files=set(),
+                            is_deleted=False
+                        )
+
+                elif modification.change_type == ModificationType.DELETE:
+                    if normalized_path in file_histories:
+                        file_histories[normalized_path].is_deleted = True
+                        file_histories[normalized_path].modifications.append(
+                            (commit.author_date, commit.hash)
+                        )
+
+                elif modification.change_type == ModificationType.MODIFY:
+                    if normalized_path in file_histories:
+                        file_histories[normalized_path].last_modified_date = (
+                            commit.author_date
+                        )
+                        file_histories[normalized_path].modifications.append(
+                            (commit.author_date, commit.hash)
+                        )
+
+                        # Update content history for modified files
+                        content = FileContent("", [], [], [], False, False, [], [], [])
+                        if normalized_path.endswith(".java"):
+                            content = analyze_java_content(modification.source_code)
+
+                        file_histories[normalized_path].content_history.append(
+                            (commit.author_date, content)
+                        )
+
+        logging.info(f"Processed {commit_count} commits")
+        logging.info(f"Found {len(file_histories)} unique files")
+
+    except Exception as e:
+        logging.error(f"Error processing repository: {str(e)}")
+        raise
 
     return file_histories, commit_graph
 
@@ -336,6 +353,10 @@ def is_related_directory(test_dir: str, source_dir: str) -> bool:
     - Custom test directory conventions
     - Monorepo structures
     """
+    logging.debug(
+        f"Analyzing directory relationship between:\nTest: {test_dir}\nSource: {source_dir}"
+    )
+
     # Normalize paths for comparison
     test_components = [c.lower() for c in test_dir.split(os.sep) if c]
     source_components = [c.lower() for c in source_dir.split(os.sep) if c]
@@ -433,6 +454,7 @@ def calculate_match_confidence(
     test_file: FileHistory, source_file: FileHistory
 ) -> float:
     confidence = 0.0
+
     if test_file.basename.replace("Test", "") == source_file.basename:
         confidence += 0.4
 
@@ -468,21 +490,25 @@ def calculate_match_confidence(
 
     return min(1.0, confidence)
 
+
 def get_base_name(filename: str) -> str:
     # Remove Test from end: UserTest.java -> User.java
     base = re.sub(r"Test[s]?\.java$", ".java", filename)
-    # Remove Test from start: TestUser.java -> User.java 
+    # Remove Test from start: TestUser.java -> User.java
     base = re.sub(r"^Test(.*)\.java$", r"\1.java", base)
     return base
 
-def match_tests_sources(file_histories: Dict[str, FileHistory], commit_graph: CommitGraph) -> List[MatchedPair]:
-    logging.info("Starting initial test-source file matching process")
+
+def match_tests_sources(
+    file_histories: Dict[str, FileHistory], commit_graph: CommitGraph
+) -> List[MatchedPair]:
+    logging.info("Starting enhanced test-source file matching process")
     matches = []
 
+    # Group files by their base names (without Test/Tests suffix)
     basename_groups = defaultdict(list)
     test_files_count = 0
     source_files_count = 0
-    
     for path, history in file_histories.items():
         if not history.is_deleted:
             if history.is_test:
@@ -491,18 +517,24 @@ def match_tests_sources(file_histories: Dict[str, FileHistory], commit_graph: Co
             else:
                 source_files_count += 1
                 logging.debug(f"Found source file: {path}")
+
             base = get_base_name(history.basename)
             basename_groups[base].append(history)
 
     logging.info(f"Total test files found: {test_files_count}")
     logging.info(f"Total source files found: {source_files_count}")
-    
-    # Original matching logic (unchanged)
+    logging.info(f"Number of base name groups: {len(basename_groups)}")
+
+    # Process each group
     for base, histories in basename_groups.items():
         logging.debug(f"\nProcessing base name group: {base}")
+
         test_files = [h for h in histories if h.is_test]
         source_files = [h for h in histories if not h.is_test]
-        logging.debug(f"Found {len(test_files)} test files and {len(source_files)} source files in group")
+
+        logging.debug(
+            f"Found {len(test_files)} test files and {len(source_files)} source files in group"
+        )
 
         for test_file in test_files:
             logging.debug(f"\nAnalyzing test file: {test_file.full_path}")
@@ -521,12 +553,16 @@ def match_tests_sources(file_histories: Dict[str, FileHistory], commit_graph: Co
                     # Check for same-commit TDD patterns
                     if has_tdd_indicators(test_file, source_file):
                         confidence += 0.1
-                        logging.debug(f"Added TDD indicator bonus. New confidence: {confidence}")
+                        logging.debug(
+                            f"Added TDD indicator bonus. New confidence: {confidence}"
+                        )
 
                 # Check if files were moved from another repository
                 if indicates_repository_move(test_file, source_file, commit_graph):
                     confidence += 0.05
-                    logging.debug(f"Added repository move bonus. New confidence: {confidence}")
+                    logging.debug(
+                        f"Added repository move bonus. New confidence: {confidence}"
+                    )
 
                 if confidence > best_confidence:
                     logging.debug(f"New best match found with confidence {confidence}")
@@ -555,8 +591,6 @@ def match_tests_sources(file_histories: Dict[str, FileHistory], commit_graph: Co
                         relationship_type=relationship_type,
                     )
                 )
-   
-
     # Second pass: Check remaining unmatched test files using imports
     matched_test_paths = {match.test_file.full_path for match in matches}
     all_test_files = [h for h in file_histories.values() if h.is_test and not h.is_deleted]
@@ -593,28 +627,25 @@ def match_tests_sources(file_histories: Dict[str, FileHistory], commit_graph: Co
                         )
                     )
 
+    logging.info(f"Total matches found: {len(matches)}")
     return matches
 
 
 def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool:
-    """
-    Analyzes test and source files for TDD practice indicators.
-    Returns True if there are strong indicators that TDD was followed.
-    """
-    # Get initial content from creation time
+    """Check for indicators of TDD when files are committed together."""
+    # Get content at creation time
     test_initial = next(
-        (c for d, c in test_file.content_history if d == test_file.creation_date), 
-        None
+        (c for d, c in test_file.content_history if d == test_file.creation_date), None
     )
     source_initial = next(
         (c for d, c in source_file.content_history if d == source_file.creation_date),
-        None
+        None,
     )
 
     if not (test_initial and source_initial):
         return False
 
-    # Enhanced test completeness check
+      # Enhanced test completeness check
     test_methods_complete = False
     if test_initial.test_methods:
         # Get the raw content to analyze test methods
@@ -681,7 +712,6 @@ def has_tdd_indicators(test_file: FileHistory, source_file: FileHistory) -> bool
         has_test_framework and has_testing_imports and test_methods_complete
     )
 
-# TODO: Figure what the fuck this is
 def indicates_repository_move(
     file1: FileHistory, file2: FileHistory, commit_graph: CommitGraph
 ) -> bool:
@@ -708,6 +738,7 @@ def indicates_repository_move(
                     # If either commit is at a branch point, likely indicates a repository merge
                     return bool(branch_point1 or branch_point2)
     return False
+
 
 def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) -> dict:
     """Enhanced TDD pattern analysis with more detailed reporting"""
@@ -892,35 +923,36 @@ def generate_detailed_report(results: dict, output_dir: str):
     #     logging.info(f"    Score: {conf_detail['confidence_score']:.2f}")
     #     logging.info(f"    Factors: {', '.join(conf_detail['factors'])}")
 
+
 def main():
     logging.info("Starting enhanced TDD analysis")
-    # Clone repositories
-    clone_repos(REPO_URLS, CLONE_DIR)
+    try:
+        # Clone repositories
+        clone_repos(REPO_URLS, CLONE_DIR)
 
-    # Analyze each repository
-    for repo_name in os.listdir(CLONE_DIR):
-        repo_path = os.path.join(CLONE_DIR, repo_name)
-        if os.path.isdir(repo_path):
-            logging.info(f"\nAnalyzing repository: {repo_name}")
+        # Analyze each repository
+        for repo_name in os.listdir(CLONE_DIR):
+            repo_path = os.path.join(CLONE_DIR, repo_name)
+            if os.path.isdir(repo_path):
+                logging.info(f"\nAnalyzing repository: {repo_name}")
 
-            # Get file histories and commit graph
-            # TODO: Figure what is the commit graph
-            file_histories, commit_graph = get_file_creation_dates(repo_path)
+                # Get file histories and commit graph
+                file_histories, commit_graph = get_file_creation_dates(repo_path)
 
-            # Match test and source files
-            matches = match_tests_sources(file_histories, commit_graph)
+                # Match test and source files
+                matches = match_tests_sources(file_histories, commit_graph)
 
-            # Analyze TDD patterns
-            results = analyze_tdd_patterns(matches, commit_graph)
+                # Analyze TDD patterns
+                results = analyze_tdd_patterns(matches, commit_graph)
 
-            # Generate detailed report
-            generate_detailed_report(results, OUTPUT_DIR)
+                # Generate detailed report
+                generate_detailed_report(results, OUTPUT_DIR)
+
+    except Exception as e:
+        logging.error(f"Fatal error in main execution: {str(e)}")
 
     logging.info("Analysis completed")
 
 
 if __name__ == "__main__":
     main()
-
-
-
