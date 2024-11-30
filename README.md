@@ -1,5 +1,9 @@
 # Test-Driven Development (TDD) Analysis Tool with Pydriller
 
+## Prerequisites
+
+- Python 3.9.4
+- Java 17
 
 ## Setup
 
@@ -21,6 +25,19 @@ Afterwards pip install the dependencies:
 ```
 pip install -r requirements.txt 
 ```
+
+Before running we the script we need to setup a Py4J gateway server, this is needed for parsing Java files (Up to Java 17), simply run this shell command file, it contains the necessary command to compile the relevant java files and run the gateway:
+
+For MacOS/linux
+```
+./setup.sh 
+```
+
+For Windows:
+```
+setup.bat
+```
+Once the server is running, you may proceed to run the scripts:
 
 Debugging run, script with less try/catch blocks for faster fault localization:
 ```

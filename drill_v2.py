@@ -9,10 +9,6 @@ from pydriller import Repository, ModificationType
 import pandas as pd
 from datetime import datetime
 import logging
-import ast
-import javalang
-from javalang.parser import Parser
-from javalang.tree import MethodDeclaration, ClassDeclaration
 import networkx as nx
 
 # Create logs directory if it doesn't exist
@@ -170,76 +166,80 @@ def clone_repos(repo_urls, clone_dir):
         else:
             logging.info(f"{repo_name} already exists at {repo_path}")
 
-
 def analyze_java_content(content: str) -> FileContent:
-    tree = javalang.parse.parse(content)
-    imports = [imp.path for imp in tree.imports]
-
-    class_names = []
-    method_names = []
-    is_abstract = False
-    is_utility = False
-    test_frameworks = []
-    test_methods = []
-    dependencies = []
-    
-    # First check if this is a real test class by looking for test framework imports/annotations
-    has_test_framework = any(framework in imp for imp in imports for framework in TEST_PATTERNS["java"]["frameworks"])
-    has_test_annotation = False
-
-    for path, node in tree.filter(ClassDeclaration):
-        class_names.append(node.name)
-
-        # Check for abstract modifier
-        if "abstract" in node.modifiers:
-            is_abstract = True
-
-        if all("static" in method.modifiers for method in node.methods):
-            is_utility = True
-
-        # Look for @Test annotations at class level
-        if hasattr(node, 'annotations'):
-            for annotation in node.annotations:
-                if annotation.name == 'Test':
-                    has_test_annotation = True
-
-        # Only look for test methods if class is not abstract
-        if not is_abstract:
-            for method in node.methods:
-                method_names.append(method.name)
-                
-                # Only consider method as test if class uses test framework
-                if has_test_framework:
-                    if hasattr(method, 'annotations') and method.annotations:
-                        for annotation in method.annotations:
-                            if annotation.name == 'Test':
-                                has_test_annotation = True
-                                test_methods.append(method.name)
-                                break
-
-    # Only include test frameworks if actually test class and not abstract
-    if has_test_framework and has_test_annotation and not is_abstract:
+    try:
+        import logging
+        py4j_logger = logging.getLogger("py4j")
+        py4j_logger.setLevel(logging.WARNING)  # Only show warnings and errors
+        
+        # Connect to the Java Gateway
+        from py4j.java_gateway import JavaGateway, GatewayParameters
+        logging.info("Connecting to Java Gateway")
+        
+        gateway = JavaGateway(
+            gateway_parameters=GatewayParameters(
+                auto_convert=True,
+                auto_field=True
+            )
+        )
+        
+        parser = gateway.entry_point
+        result = parser.parseJavaContent(content)
+        
+        if result is None:
+            logging.error("Received null result from Java parser")
+            return create_empty_file_content(content)
+            
+        # Get basic information
+        imports = list(result.getImports())
+        class_names = list(result.getClasses())
+        method_names = list(result.getMethods())
+        test_methods = list(result.getTestMethods())
+        
+        # Clean logging of what we found
+        logging.info(f"Parsed Java file with {len(class_names)} classes")
+        logging.info(f"Found {len(method_names)} methods, {len(test_methods)} test methods")
+        logging.debug(f"Imports: {', '.join(imports)}")
+        logging.debug(f"Classes: {', '.join(class_names)}")
+        logging.debug(f"Methods: {', '.join(method_names)}")
+        if test_methods:
+            logging.debug(f"Test methods: {', '.join(test_methods)}")
+        
+        # Get test frameworks from imports
+        test_frameworks = []
         for framework in TEST_PATTERNS["java"]["frameworks"]:
             if any(framework in imp for imp in imports):
                 test_frameworks.append(framework)
+                logging.debug(f"Found test framework: {framework}")
+        
+        return FileContent(
+            raw_content=content,
+            imports=imports,
+            class_names=class_names,
+            method_names=method_names,
+            is_abstract=result.isAbstract(),
+            is_utility=result.isUtility(),
+            test_frameworks=test_frameworks,
+            test_methods=test_methods,
+            dependencies=list(set(imports))
+        )
+        
+    except Exception as e:
+        logging.error(f"Error in analyze_java_content: {str(e)}", exc_info=True)
+        return create_empty_file_content(content)
 
-    # Enhanced dependency extraction
-    dependencies = set()
-    dependencies.update(imports)
-    for path, node in tree.filter(javalang.tree.ReferenceType):
-        if hasattr(node, 'name'):
-            dependencies.add(node.name)
-
+def create_empty_file_content(content: str) -> FileContent:
+    """Helper function to create an empty FileContent object"""
     return FileContent(
         raw_content=content,
-        imports=imports,
-        class_names=class_names,
-        method_names=method_names,
-        is_abstract=is_abstract,
-        is_utility=is_utility,
-        test_frameworks=test_frameworks,
-        test_methods=test_methods,
-        dependencies=list(dependencies)
+        imports=[],
+        class_names=[],
+        method_names=[],
+        is_abstract=False,
+        is_utility=False,
+        test_frameworks=[],
+        test_methods=[],
+        dependencies=[]
     )
 
 def get_file_creation_dates(
@@ -931,8 +931,13 @@ def main():
         clone_repos(REPO_URLS, CLONE_DIR)
 
         # Analyze each repository
-        for repo_name in os.listdir(CLONE_DIR):
+        for repo_url in REPO_URLS:
+            repo_name = repo_url.split("/")[-1].replace(".git", "")
             repo_path = os.path.join(CLONE_DIR, repo_name)
+
+            if not os.path.exists(repo_path):
+                logging.error(f"Repository {repo_name} does not exist at {repo_path}. Skipping...")
+                continue
             if os.path.isdir(repo_path):
                 logging.info(f"\nAnalyzing repository: {repo_name}")
 
