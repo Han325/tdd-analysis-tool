@@ -1,13 +1,12 @@
 import re
 from typing import Dict, Tuple, List, NamedTuple, Set, Optional
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from collections import defaultdict
 from git import Repo, Commit
 from pydriller import Repository, ModificationType
 import pandas as pd
-from datetime import datetime
 import logging
 import networkx as nx
 
@@ -30,8 +29,9 @@ logging.basicConfig(
 REPO_URLS = [
     # "https://github.com/apache/bigtop-manager",
     # "https://github.com/apache/commons-csv",
-    # "https://github.com/apache/doris-kafka-connector"
-    "https://github.com/apache/struts-intellij-plugin",
+    # "https://github.com/apache/doris-kafka-connector",
+    # "https://github.com/apache/struts-intellij-plugin",
+    "https://github.com/apache/hbase"
 ]
 
 # Directory to clone repositories
@@ -694,7 +694,7 @@ def indicates_repository_move(
             # Files have similar content but different creation dates
             if content1.raw_content == content2.raw_content and abs(
                 date1 - date2
-            ) > datetime.timedelta(days=1):
+            ) > timedelta(days=1):
                 # Check if commit is a merge or has multiple parents
                 commit1 = next(
                     (commit for _, commit in file1.modifications if date1 == _), None
