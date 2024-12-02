@@ -27,11 +27,10 @@ logging.basicConfig(
 
 # List of repository URLs
 REPO_URLS = [
-    # "https://github.com/apache/bigtop-manager",
-    # "https://github.com/apache/commons-csv",
-    # "https://github.com/apache/doris-kafka-connector",
+
+    "https://github.com/apache/doris-kafka-connector",
     # "https://github.com/apache/struts-intellij-plugin",
-    "https://github.com/apache/hbase"
+    # "https://github.com/apache/hbase"
 ]
 
 # Directory to clone repositories
@@ -122,6 +121,67 @@ class MatchedPair(NamedTuple):
     directory_match: bool
     confidence_score: float  # Indicates confidence in the match
     relationship_type: str  # 'direct', 'abstract', 'utility', etc.
+
+
+@dataclass
+class CommitAnalysis:
+    """Enhanced commit analysis for TDD patterns"""
+    hash: str
+    message: str
+    date: datetime
+    modified_files: List[Tuple[str, FileContent]]  # [(path, content)]
+    lines_added: int
+    lines_removed: int
+    is_merge: bool
+
+    @property
+    def size_category(self) -> str:
+        """Categorize commit size based on changes"""
+        total_changes = self.lines_added + self.lines_removed
+        num_files = len(self.modified_files)
+        if num_files <= 2 and total_changes <= 50:
+            return "small"
+        elif num_files <= 5 and total_changes <= 200:
+            return "medium"
+        else:
+            return "large"
+    
+    def has_tdd_message_indicators(self) -> bool:
+        """Analyzes commit messages for realistic TDD patterns."""
+        msg_lower = self.message.lower()
+        
+        patterns = [
+            r"\btdd\b",
+            r"test[s]?\s*[:+]\s*\w+",
+            r"add(ed|ing)?\s+tests?",
+            r"\btests?\s+first\b", 
+            r"test[s]?\s+[+&]\s+impl",
+        ]
+        
+        return any(re.search(pattern, msg_lower) for pattern in patterns)
+
+    def analyze_commit_context(self) -> bool:
+        """Combines message analysis with code change context"""
+        has_test_indicator = self.has_tdd_message_indicators()
+        test_files_added = any('test' in path.lower() for path, _ in self.modified_files)
+        
+        # Check for test-related content in modified files
+        test_content_changes = False
+        for _, content in self.modified_files:
+            if content.test_methods or content.test_frameworks:
+                test_content_changes = True
+                break
+                
+        return has_test_indicator and (test_files_added or test_content_changes)
+
+    @property
+    def commit_type(self) -> str:
+        """Categorize commit based on changes"""
+        if self.is_merge:
+            return "merge"
+        if self.analyze_commit_context():
+            return "test_related"
+        return "implementation"
 
 
 class CommitGraph:
@@ -245,6 +305,7 @@ def get_file_creation_dates(
 ) -> Tuple[Dict[str, FileHistory], CommitGraph]:
     file_histories: Dict[str, FileHistory] = {}
     commit_graph = CommitGraph()
+    commit_analyses = []  # New list to store commit analyses
 
     repo = Repo(repo_path)
     default_branch = repo.active_branch.name
@@ -263,6 +324,10 @@ def get_file_creation_dates(
 
         logging.debug(f"Processing commit {commit.hash[:8]} from {commit.author_date}")
 
+        modified_files = []
+        total_lines_added = 0
+        total_lines_removed = 0
+
         for modification in commit.modified_files:
             current_path = modification.new_path or modification.old_path
             if not current_path:
@@ -278,12 +343,17 @@ def get_file_creation_dates(
             logging.debug(f"Processing file: {normalized_path}")
             logging.debug(f"Change type: {modification.change_type}")
 
+             # Track lines changed
+            total_lines_added += modification.added_lines
+            total_lines_removed += modification.deleted_lines
+
             if modification.change_type == ModificationType.ADD:
                 if normalized_path not in file_histories:
                     # Parse content based on file type
                     content = FileContent("", [], [], [], False, False, [], [], [])
                     if normalized_path.endswith(".java"):
                         content = analyze_java_content(modification.source_code)
+                        modified_files.append((normalized_path, content))
 
                     file_histories[normalized_path] = FileHistory(
                         creation_date=commit.author_date,
@@ -317,12 +387,27 @@ def get_file_creation_dates(
                     content = FileContent("", [], [], [], False, False, [], [], [])
                     if normalized_path.endswith(".java"):
                         content = analyze_java_content(modification.source_code)
+                        modified_files.append((normalized_path, content))
 
                     file_histories[normalized_path].content_history.append(
                         (commit.author_date, content)
                     )
+        
+        # Create commit analysis after processing all modifications
+        commit_analyses.append(CommitAnalysis(
+                hash=commit.hash,
+                message=commit.msg,
+                date=commit.author_date,
+                modified_files=modified_files,
+                lines_added=sum(m.added_lines for m in commit.modified_files),
+                lines_removed=sum(m.deleted_lines for m in commit.modified_files),
+                is_merge=len(commit.parents) > 1
+            ))
+        
+        logging.info(f"Processed {commit_count} commits")
+        logging.info(f"Found {len(file_histories)} unique files")
 
-    return file_histories, commit_graph
+    return file_histories, commit_graph, commit_analyses
 
 
 def is_related_directory(test_dir: str, source_dir: str) -> bool:
@@ -711,7 +796,7 @@ def indicates_repository_move(
                     return bool(branch_point1 or branch_point2)
     return False
 
-def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) -> dict:
+def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph, commit_analyses: List[CommitAnalysis]) -> dict:
     """Enhanced TDD pattern analysis with more detailed reporting"""
     logging.info("Starting comprehensive TDD pattern analysis")
 
@@ -722,16 +807,37 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
         "test_after": 0,
         "same_commit_tdd": 0,
         "same_commit_unclear": 0,
-        "relationship_details": [],  # New: detailed relationship info
-        "relationship_types": defaultdict(int),  # Fixed: Initialize defaultdict
-        "confidence_details": [],    # New: detailed confidence info
-        "confidence_distribution": defaultdict(int),  # Added: Initialize defaultdict
+        "relationship_details": [],  
+        "relationship_types": defaultdict(int),  
+        "confidence_details": [],  
+        "confidence_distribution": defaultdict(int),
         "multi_test_coverage": 0,
         "abstract_base_coverage": 0,
         "utility_class_coverage": 0,
-        "framework_details": [],     # New: detailed framework info
+        "framework_details": [],
         "repository_moves": 0,
         "squashed_commits": 0,
+
+        # Added new metrics
+        "commit_sizes": {
+            "small": {"test_first": 0, "test_after": 0, "same_commit": 0},
+            "medium": {"test_first": 0, "test_after": 0, "same_commit": 0},
+            "large": {"test_first": 0, "test_after": 0, "same_commit": 0}
+        },
+        "commit_messages": {
+            "tdd_indicated": 0,
+            "test_focused": 0
+        },
+        "commit_patterns": {
+            "test_related": 0,
+            "implementation": 0,
+            "merge": 0
+        },
+        "context_analysis": {
+            "message_and_content_match": 0,
+            "message_only": 0,
+            "content_only": 0
+        }
     }
 
     # Track source files with multiple tests
@@ -780,16 +886,42 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
         # Add to source-test mapping
         source_to_tests[match.source_file.full_path].append(match.test_file)
 
-        # Analyze creation pattern
-        if match.test_file.creation_date < match.source_file.creation_date:
-            results["test_first"] += 1
-        elif match.test_file.creation_date > match.source_file.creation_date:
-            results["test_after"] += 1
-        else:
-            if has_tdd_indicators(match.test_file, match.source_file):
-                results["same_commit_tdd"] += 1
+        # Find relevant commits
+        test_commit = next((ca for ca in commit_analyses 
+                          if any(path == match.test_file.full_path 
+                                for path, _ in ca.modified_files)), None)
+        source_commit = next((ca for ca in commit_analyses 
+                            if any(path == match.source_file.full_path 
+                                  for path, _ in ca.modified_files)), None)
+
+        if test_commit and source_commit:
+            size_category = test_commit.size_category
+            
+            # Analyze creation pattern (combining original and new logic)
+            if match.test_file.creation_date < match.source_file.creation_date:
+                results["test_first"] += 1
+                results["commit_sizes"][size_category]["test_first"] += 1
+            elif match.test_file.creation_date > match.source_file.creation_date:
+                results["test_after"] += 1
+                results["commit_sizes"][size_category]["test_after"] += 1
             else:
-                results["same_commit_unclear"] += 1
+                if has_tdd_indicators(match.test_file, match.source_file):
+                    results["same_commit_tdd"] += 1
+                    results["commit_sizes"][size_category]["same_commit"] += 1
+                else:
+                    results["same_commit_unclear"] += 1
+            
+            # Enhanced commit analysis
+            results["commit_patterns"][test_commit.commit_type] += 1
+            if test_commit.has_tdd_message_indicators():
+                results["commit_messages"]["tdd_indicated"] += 1
+                if test_commit.analyze_commit_context():
+                    results["context_analysis"]["message_and_content_match"] += 1
+                else:
+                    results["context_analysis"]["message_only"] += 1
+            elif test_commit.analyze_commit_context():
+                results["context_analysis"]["content_only"] += 1
+
 
         # Track frameworks used
         latest_test_content = match.test_file.latest_content
@@ -809,7 +941,7 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
     if total_determinable > 0:
         results["tdd_adoption_rate"] = (results["test_first"] + results["same_commit_tdd"]) / total_determinable
 
-     # Convert defaultdicts to regular dicts for cleaner logging
+    # Convert defaultdicts to regular dicts for cleaner logging
     simple_results = {
         "total_matches": results["total_matches"],
         "same_directory_matches": results["same_directory_matches"],
@@ -817,13 +949,26 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph) 
         "test_after": results["test_after"],
         "same_commit_tdd": results["same_commit_tdd"],
         "same_commit_unclear": results["same_commit_unclear"],
-        "relationship_types": dict(results["relationship_types"]),
-        "confidence_distribution": dict(results["confidence_distribution"]),
-        "multi_test_coverage": results["multi_test_coverage"],
-        "abstract_base_coverage": results["abstract_base_coverage"],
-        "utility_class_coverage": results["utility_class_coverage"],
-        "repository_moves": results["repository_moves"],
-        "squashed_commits": results["squashed_commits"]
+        # Commented out following output to focus core data related to RQ
+        # "relationship_types": dict(results["relationship_types"]),
+        # "confidence_distribution": dict(results["confidence_distribution"]),
+        # "multi_test_coverage": results["multi_test_coverage"],
+        # "abstract_base_coverage": results["abstract_base_coverage"],
+        # "utility_class_coverage": results["utility_class_coverage"],
+        # "repository_moves": results["repository_moves"],
+        # "squashed_commits": results["squashed_commits"],
+
+        # Add commit size metrics
+        "commit_sizes": {
+            "small": dict(results["commit_sizes"]["small"]),
+            "medium": dict(results["commit_sizes"]["medium"]),
+            "large": dict(results["commit_sizes"]["large"])
+        },
+        # Add commit message metrics
+        "commit_messages": dict(results["commit_messages"]),
+         # Add commit pattern metrics
+        "commit_patterns": dict(results["commit_patterns"]),
+        "context_analysis": dict(results["context_analysis"])
     }
     if "tdd_adoption_rate" in results:
         simple_results["tdd_adoption_rate"] = results["tdd_adoption_rate"]
@@ -846,29 +991,106 @@ def generate_detailed_report(results: dict, output_dir: str):
     logging.info(f"Generating reports in directory: {run_dir}")
 
     # Create main results CSV
-    main_df = pd.DataFrame([{k: v for k, v in results.items() 
-                            if not isinstance(v, (list, dict, defaultdict))}])
+    main_summary = {
+        "total_matches": results["total_matches"],
+        "same_directory_matches": results["same_directory_matches"],
+        "test_first": results["test_first"],
+        "test_after": results["test_after"],
+        "same_commit_tdd": results["same_commit_tdd"],
+        "same_commit_unclear": results["same_commit_unclear"],
+        "tdd_adoption_rate": results.get("tdd_adoption_rate", 0)
+    }
+    main_df = pd.DataFrame([main_summary])
     main_df.to_csv(os.path.join(run_dir, "debug_tdd_analysis_summary.csv"), 
                   index=False)
 
-    # Create detailed relationship analysis CSV
-    relationship_df = pd.DataFrame(results["relationship_details"])
-    relationship_df.to_csv(
-        os.path.join(run_dir, "relationship_analysis.csv"),
+    # Commented out following csv output to focus core data related to RQ
+    # # Create detailed relationship analysis CSV
+    # relationship_df = pd.DataFrame(results["relationship_details"])
+    # relationship_df.to_csv(
+    #     os.path.join(run_dir, "relationship_analysis.csv"),
+    #     index=False
+    # )
+
+    # # Create detailed confidence analysis CSV
+    # confidence_df = pd.DataFrame(results["confidence_details"])
+    # confidence_df.to_csv(
+    #     os.path.join(run_dir, "confidence_analysis.csv"),
+    #     index=False
+    # )
+
+    # # Create detailed framework analysis CSV
+    # framework_df = pd.DataFrame(results["framework_details"])
+    # framework_df.to_csv(
+    #     os.path.join(run_dir, "framework_analysis.csv"),
+    #     index=False
+    # )
+
+    size_data = []
+    for size, patterns in results["commit_sizes"].items():
+        row = {"size_category": size}
+        row.update(patterns)
+        size_data.append(row)
+    size_df = pd.DataFrame(size_data)
+    size_df.to_csv(
+        os.path.join(run_dir, "commit_size_analysis.csv"),
         index=False
     )
 
-    # Create detailed confidence analysis CSV
-    confidence_df = pd.DataFrame(results["confidence_details"])
-    confidence_df.to_csv(
-        os.path.join(run_dir, "confidence_analysis.csv"),
+    # 5. New: Commit Message Pattern Analysis
+    message_df = pd.DataFrame([results["commit_messages"]])
+    message_df.to_csv(
+        os.path.join(run_dir, "commit_message_patterns.csv"),
         index=False
     )
 
-    # Create detailed framework analysis CSV
-    framework_df = pd.DataFrame(results["framework_details"])
-    framework_df.to_csv(
-        os.path.join(run_dir, "framework_analysis.csv"),
+    # Commented out following csv output to focus core data related to RQ
+    # # 6. Relationship Types Distribution
+    # relationship_types_df = pd.DataFrame([dict(results["relationship_types"])])
+    # relationship_types_df.to_csv(
+    #     os.path.join(run_dir, "relationship_types.csv"),
+    #     index=False
+    # )
+
+    # # 7. Confidence Distribution 
+    # confidence_dist_df = pd.DataFrame([dict(results["confidence_distribution"])])
+    # confidence_dist_df.to_csv(
+    #     os.path.join(run_dir, "confidence_distribution.csv"),
+    #     index=False
+    # )
+
+    # 9. New: Commit Pattern Analysis
+    commit_patterns_df = pd.DataFrame([results["commit_patterns"]])
+    commit_patterns_df.to_csv(os.path.join(run_dir, "commit_patterns.csv"), index=False)
+
+    # 10. New: Context Analysis
+    context_analysis_df = pd.DataFrame([results["context_analysis"]])
+    context_analysis_df.to_csv(os.path.join(run_dir, "context_analysis.csv"), index=False)
+
+    # 11. Combined Analysis CSV (new comprehensive view)
+    combined_analysis = {
+        **main_summary,
+        "small_test_first": results["commit_sizes"]["small"]["test_first"],
+        "small_test_after": results["commit_sizes"]["small"]["test_after"],
+        "small_same_commit": results["commit_sizes"]["small"]["same_commit"],
+        "medium_test_first": results["commit_sizes"]["medium"]["test_first"],
+        "medium_test_after": results["commit_sizes"]["medium"]["test_after"],
+        "medium_same_commit": results["commit_sizes"]["medium"]["same_commit"],
+        "large_test_first": results["commit_sizes"]["large"]["test_first"],
+        "large_test_after": results["commit_sizes"]["large"]["test_after"],
+        "large_same_commit": results["commit_sizes"]["large"]["same_commit"],
+        "tdd_indicated_commits": results["commit_messages"]["tdd_indicated"],
+        "test_focused_commits": results["commit_messages"]["test_focused"],
+        "test_related_commits": results["commit_patterns"]["test_related"],
+        "implementation_commits": results["commit_patterns"]["implementation"],
+        "merge_commits": results["commit_patterns"]["merge"],
+        "message_content_match": results["context_analysis"]["message_and_content_match"],
+        "message_only_indicators": results["context_analysis"]["message_only"],
+        "content_only_indicators": results["context_analysis"]["content_only"]
+    }
+    combined_df = pd.DataFrame([combined_analysis])
+    combined_df.to_csv(
+        os.path.join(run_dir, "combined_analysis.csv"),
         index=False
     )
 
@@ -911,14 +1133,13 @@ def main():
             logging.info(f"\nAnalyzing repository: {repo_name}")
 
             # Get file histories and commit graph
-            # TODO: Figure what is the commit graph
-            file_histories, commit_graph = get_file_creation_dates(repo_path)
+            file_histories, commit_graph, commit_analyses = get_file_creation_dates(repo_path)
 
             # Match test and source files
             matches = match_tests_sources(file_histories, commit_graph)
 
             # Analyze TDD patterns
-            results = analyze_tdd_patterns(matches, commit_graph)
+            results = analyze_tdd_patterns(matches, commit_graph, commit_analyses)
 
             # Generate detailed report
             generate_detailed_report(results, OUTPUT_DIR)
