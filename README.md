@@ -37,7 +37,7 @@ For Windows:
 ```
 setup.bat
 ```
-Once the server is running, you may proceed to run the scripts:
+Once the server is running, you may proceed to run the scripts **on another terminal**:
 
 Debugging run, script with less try/catch blocks for faster fault localization:
 ```
@@ -52,37 +52,53 @@ python drill_v2.py
 
 ## How Does The Script Works
 
-This tool analyzes Git repositories to detect and measure Test-Driven Development practices by examining the relationship between test and source files over the project's history.
+This tool analyzes Apache Git repositories to investigate Test-Driven Development (TDD) adoption patterns by examining commit histories and relationships between test and source files. The analysis specifically focuses on answering key research questions about TDD practices in Apache projects.
 
-### Overview
+### Research Questions Addressed
 
-The tool analyzes Git repositories to:
-1. Identify test and source file pairs
-2. Determine when tests were written relative to their corresponding source files
-3. Evaluate the strength of test-source relationships
-4. Measure TDD adoption patterns across the project's history
+1. How does a TDD-compliant commit manifest in practice?
+2. What is the temporal relationship between test and source file creation?
+   - Test created before source (test-first)
+   - Test created after source (test-after)
+   - Test and source created in same commit
+3. How does commit size impact TDD patterns?
+4. What methods can reliably identify test files?
+5. How can we establish links between test and source files?
+6. What characteristics identify test-first commits?
+7. How can we measure TDD adoption rates?
+8. How does TDD adoption vary across Apache projects?
 
 ### Key Assumptions
 
-1. **Test-Source Relationship**: Each test file should correspond to at least one source file. This is used to identify legitimate test-source pairs.
+1. **Test-Source Relationship**: 
+   - Each test file should correspond to at least one source file
+   - The git repository should reflect TDD practices through commit history
 
-2. **TDD Commit Patterns**: For files committed together:
+2. **TDD Commit Patterns**:
    - Tests should be comprehensive (not skeletal)
-   - Source files should be skeletal (indicating implementation follows tests)
+   - Source files should be skeletal in test-first commits
    - Test files must include proper annotations and assertions
+   - Commit messages and content should show TDD intent
 
-3. **Testing Coverage**: Not all source files require corresponding test files, as some may be utility classes, interfaces, or non-business logic code.
-
-4. **Test Validity**: Valid tests must:
+3. **Test Validity**: Valid tests must:
    - Include proper test annotations (e.g., `@Test`)
    - Contain meaningful assertions
    - Not be abstract test classes
+   - Have proper test framework imports
 
 ### Methodology
 
-#### 1. File Classification
+#### 1. Repository Analysis
 
-Analyzes each commit in the default branch to identify:
+Focuses exclusively on Apache projects due to:
+- Consistent Apache License coverage
+- High-quality project standards
+- Best practice adherence
+- Ethical considerations alignment
+
+#### 2. File Classification
+
+Analyzes each commit to identify:
 
 ##### Test Files
 - Identified through:
@@ -93,31 +109,44 @@ Analyzes each commit in the default branch to identify:
 
 ##### Source Files
 - Identified through:
-  - File extensions (`.java`, `.py`)
+  - Java source files
   - Content analysis
   - Relationship to test files
 
-#### 2. File History Analysis
+#### 3. Commit Graph Analysis
 
-For each unique file, creates:
+The tool maintains a directed graph of commits to handle complex repository histories and improve TDD pattern detection accuracy. This graph structure serves three key purposes:
 
-- **Content Object** tracking:
-  - Methods
-  - Frameworks used
-  - Class names
-  - Import statements
-  - Dependencies
+##### Repository Move Detection
+- Identifies cases where files were moved from another repository by:
+  - Finding files with similar content but different creation dates
+  - Checking if commits occur at branch merge points
+  - Adjusting confidence scores when repository moves are detected
+  - Preventing false test-after classifications due to repository migrations
 
-- **History Object** tracking:
-  - Creation date
-  - Modification dates
-  - Movement history
-  - Related files
-  - Commit information
+##### Ancestry Analysis
+- Tracks related changes across branches through common ancestor detection:
+  - Finds lowest common ancestor between commit pairs
+  - Maps evolutionary relationships between test and source files
+  - Analyzes modifications across different branches
+  - Helps establish true chronological relationships between test and source creation
 
-#### 3. Test-Source Matching
+##### Branch Point Detection
+- Identifies critical points in repository structure:
+  - Locates commits with multiple parents (merge commits)
+  - Marks points where code paths diverged
+  - Finds potential migration or integration points
+  - Helps adjust timestamp-based analysis when branch operations affect file history
 
-Calculates a confidence score for each potential test-source pair based on:
+This enhanced understanding of repository structure allows the tool to:
+- Account for complex version control operations
+- Provide context beyond simple file timestamps
+- Make more accurate determinations of test-first vs test-after patterns
+- Handle cases where simple chronological analysis would be misleading
+
+#### 4. Test-Source Matching
+
+Calculates confidence scores based on:
 
 1. **Directory Analysis**
    - Same directory location
@@ -133,53 +162,48 @@ Calculates a confidence score for each potential test-source pair based on:
    - Import statements
    - Framework usage
 
-4. **Historical Analysis**
-   - Creation timing
-   - Modification patterns
-   - Repository movement history
+#### 5. Commit Analysis
 
-#### 4. Secondary Matching
+Analyzes commit patterns through:
 
-For unmatched files:
+1. **Size Categories**
+   - Small (≤2 files, ≤50 lines)
+   - Medium (≤5 files, ≤200 lines)
+   - Large (>5 files or >200 lines)
 
-##### Test Files
-- Analyzes import statements
-- Examines method references
-- Reviews associated commits
+2. **Message Analysis**
+   - TDD indicators in commit messages
+   - Test-related terminology
+   - Implementation descriptions
 
-##### Source Files
-- Filters non-business logic files
-- Identifies utility classes
-- Categorizes interfaces and templates
+3. **Content Analysis**
+   - Test file changes
+   - Test framework modifications
+   - Implementation patterns
 
-#### 5. TDD Metrics Calculation
-
-Calculates TDD adoption metrics based on:
-
-1. **Temporal Analysis**
-   - Test-first commits (tests created before source)
-   - Test-after commits (tests created after source)
-   - Simultaneous commits (test and source together)
-
-2. **TDD Pattern Detection**
-For simultaneous commits:
-   - Tests must be comprehensive (>50 lines, contains assertions) (**Pending Justification**)
-   - Source must be skeletal (minimal implementation)
-   - Framework usage must be proper
-
-### Output
+### Output Analysis
 
 The tool generates detailed reports including:
 
-- Test-source pair matches with confidence scores
-- TDD adoption metrics over time
-- Directory relationship analysis
-- Framework usage statistics
-- Code movement patterns
+1. **TDD Adoption Metrics**
+   - Test-first vs test-after ratios
+   - Same-commit test-source pairs
+   - TDD pattern compliance rates
+
+2. **Commit Analysis**
+   - Size distribution of TDD commits
+   - Message pattern analysis
+   - Context-based TDD indicators
+
+3. **Project Comparison**
+   - Cross-project TDD adoption rates
+   - Framework usage patterns
+   - Directory structure analysis
 
 ### Notes
 
-- The tool assumes standard project structures but can handle variations
-- Confidence scores are relative and should be reviewed
-- Historical analysis may be affected by repository reorganizations
-- Some matches may require manual verification
+- Results require careful interpretation due to:
+  - Repository restructuring effects
+  - Commit squashing impacts
+  - Branch merge complications
+  - Historical data limitations
