@@ -81,10 +81,9 @@ This tool analyzes Apache Git repositories to investigate Test-Driven Developmen
    - Commit messages and content should show TDD intent
 
 3. **Test Validity**: Valid tests must:
-   - Include proper test annotations (e.g., `@Test`)
-   - Contain meaningful assertions
+   - Contain some kind of assertions
    - Not be abstract test classes
-   - Have proper test framework imports
+   - Has a filename containing the phase "test" (or other variations)
 
 ### Methodology
 
@@ -103,8 +102,7 @@ Analyzes each commit to identify:
 ##### Test Files
 - Identified through:
   - File naming patterns (e.g., `*Test.java`, `Test*.java`)
-  - Content analysis (`@Test` annotations)
-  - Framework imports (JUnit, TestNG, etc.)
+  - Content analysis (assert statements)
 - Excludes abstract test classes
 
 ##### Source Files

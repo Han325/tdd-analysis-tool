@@ -28,9 +28,10 @@ logging.basicConfig(
 # List of repository URLs
 REPO_URLS = [
 
-    "https://github.com/apache/doris-kafka-connector",
+    # "https://github.com/apache/doris-kafka-connector",
     # "https://github.com/apache/struts-intellij-plugin",
-    # "https://github.com/apache/hbase"
+    # "https://github.com/apache/hbase",
+    "https://github.com/apache/tomcat"
 ]
 
 # Directory to clone repositories
@@ -74,11 +75,21 @@ class FileContent:
     test_frameworks: List[str]
     test_methods: List[str]
     dependencies: List[str]
+    assert_statements: List[str] 
     
     @property
     def is_test(self) -> bool:
-        """Determine if file is a test based on content analysis"""
-        return bool(self.test_frameworks and self.test_methods and not self.is_abstract)
+        """Determine if file is a test based on enhanced content analysis"""
+        if self.is_abstract:
+            return False
+            
+        # Original framework-based detection
+        has_framework_tests = bool(self.test_frameworks and self.test_methods)
+        
+        # New assertion-based detection
+        has_assertions = bool(self.assert_statements)
+        
+        return has_framework_tests or has_assertions
 
 
 @dataclass
@@ -252,6 +263,29 @@ def analyze_java_content(content: str) -> FileContent:
         class_names = list(result.getClasses())
         method_names = list(result.getMethods())
         test_methods = list(result.getTestMethods())
+
+         # Find all assert statements in content
+        assert_statements = []
+        
+        # Helper function to clean and standardize assert statements
+        def clean_statement(stmt: str) -> str:
+            return stmt.strip().rstrip(';').strip()
+        
+        # Find Java assert statements (e.g., "assert x > 0")
+        java_asserts = re.finditer(r'\bassert\s+(?:[^;(]|\([^;]*\))*;', content)
+        assert_statements.extend(clean_statement(match.group(0)) for match in java_asserts)
+        
+        # Find ANY method call containing "assert" (including class/package prefixes)
+        # This will catch things like Arrays.assertSameElements, custom assertions, etc.
+        assert_method_calls = re.finditer(
+            r'(?:[a-zA-Z_][\w.]*\.)?[a-zA-Z_]*assert\w*\s*\([^;]*\);',
+            content,
+            re.IGNORECASE  # Make it case insensitive to catch all variants
+        )
+        assert_statements.extend(clean_statement(match.group(0)) for match in assert_method_calls)
+        
+        # Remove duplicates while preserving order
+        assert_statements = list(dict.fromkeys(assert_statements))
         
         # Clean logging of what we found
         logging.info(f"Parsed Java file with {len(class_names)} classes")
@@ -278,7 +312,8 @@ def analyze_java_content(content: str) -> FileContent:
             is_utility=result.isUtility(),
             test_frameworks=test_frameworks,
             test_methods=test_methods,
-            dependencies=list(set(imports))
+            dependencies=list(set(imports)),
+            assert_statements=assert_statements
         )
         
     except Exception as e:
@@ -296,7 +331,8 @@ def create_empty_file_content(content: str) -> FileContent:
         is_utility=False,
         test_frameworks=[],
         test_methods=[],
-        dependencies=[]
+        dependencies=[],
+        assert_statements=[]
     )
 
 
@@ -350,7 +386,7 @@ def get_file_creation_dates(
             if modification.change_type == ModificationType.ADD:
                 if normalized_path not in file_histories:
                     # Parse content based on file type
-                    content = FileContent("", [], [], [], False, False, [], [], [])
+                    content = FileContent("", [], [], [], False, False, [], [], [], [])
                     if normalized_path.endswith(".java"):
                         content = analyze_java_content(modification.source_code)
                         modified_files.append((normalized_path, content))
@@ -384,7 +420,7 @@ def get_file_creation_dates(
                     )
 
                     # Update content history for modified files
-                    content = FileContent("", [], [], [], False, False, [], [], [])
+                    content = FileContent("", [], [], [], False, False, [], [], [], [])
                     if normalized_path.endswith(".java"):
                         content = analyze_java_content(modification.source_code)
                         modified_files.append((normalized_path, content))
