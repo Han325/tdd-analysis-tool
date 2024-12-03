@@ -83,7 +83,7 @@ This tool analyzes Apache Git repositories to investigate Test-Driven Developmen
 3. **Test Validity**: Valid tests must:
    - Contain some kind of assertions
    - Not be abstract test classes
-   - Has a filename containing the phase "test" (or other variations)
+   - Has a filename containing the phrase "test" (or other variations)
 
 ### Methodology
 
