@@ -29,7 +29,8 @@ logging.basicConfig(
 REPO_URLS = [
     # "https://github.com/apache/bigtop-manager",
     # "https://github.com/apache/commons-csv",
-    "https://github.com/apache/doris-kafka-connector",
+    # "https://github.com/apache/doris-kafka-connector",
+    "https://github.com/apache/dubbo-ai", # Krystof - small repository - no TDD
     # "https://github.com/apache/struts-intellij-plugin",
     # "https://github.com/apache/shiro",
     # "https://github.com/apache/hbase",
