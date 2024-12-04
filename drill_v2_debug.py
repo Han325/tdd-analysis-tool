@@ -31,6 +31,8 @@ REPO_URLS = [
     "https://github.com/apache/doris-kafka-connector",
     # "https://github.com/apache/struts-intellij-plugin",
     # "https://github.com/apache/hbase"
+    # "https://github.com/apache/iceberg",
+
 ]
 
 # Directory to clone repositories
@@ -189,21 +191,38 @@ class CommitGraph:
         self.graph = nx.DiGraph()
 
     def add_commit(self, commit_hash: str, parent_hashes: List[str], branch: str):
-        self.graph.add_node(commit_hash, branch=branch)
-        for parent in parent_hashes:
-            self.graph.add_edge(parent, commit_hash)
-
-    def find_common_ancestor(self, commit1: str, commit2: str) -> Optional[str]:
+        """Add commit and its parents to the graph with safety checks"""
         try:
-            return nx.lowest_common_ancestor(self.graph, commit1, commit2)
-        except:
-            return None
+            if commit_hash:  # Ensure we have a valid commit hash
+                self.graph.add_node(commit_hash, branch=branch)
+                for parent in parent_hashes:
+                    if parent:  # Ensure we have a valid parent hash
+                        self.graph.add_edge(parent, commit_hash)
+        except Exception as e:
+            logging.warning(f"Error adding commit to graph: {str(e)}")
 
     def get_branch_point(self, commit_hash: str) -> Optional[str]:
-        predecessors = list(self.graph.predecessors(commit_hash))
-        if len(predecessors) > 1:
-            return commit_hash
-        return None
+        """Safely get branch point with error handling"""
+        try:
+            if commit_hash not in self.graph:
+                return None
+            predecessors = list(self.graph.predecessors(commit_hash))
+            if len(predecessors) > 1:
+                return commit_hash
+            return None
+        except Exception as e:
+            logging.warning(f"Error getting branch point: {str(e)}")
+            return None
+
+    def find_common_ancestor(self, commit1: str, commit2: str) -> Optional[str]:
+        """Safely find common ancestor with error handling"""
+        try:
+            if commit1 not in self.graph or commit2 not in self.graph:
+                return None
+            return nx.lowest_common_ancestor(self.graph, commit1, commit2)
+        except Exception as e:
+            logging.warning(f"Error finding common ancestor: {str(e)}")
+            return None
 
 
 def clone_repos(repo_urls, clone_dir):
