@@ -29,13 +29,17 @@ logging.basicConfig(
 REPO_URLS = [
     # "https://github.com/apache/bigtop-manager",
     # "https://github.com/apache/commons-csv",
-    "https://github.com/apache/doris-kafka-connector",
-    # "https://github.com/apache/struts-intellij-plugin",
+    # "https://github.com/apache/doris-kafka-connector",
+    "https://github.com/apache/struts-intellij-plugin",
     # "https://github.com/apache/shiro",
     # "https://github.com/apache/hbase",
     # "https://github.com/apache/doris-manager",
     # "https://github.com/apache/commons-io",
-    # "https://github.com/apache/tomcat"
+    # "https://github.com/apache/tomcat",
+    # "https://github.com/apache/flink",
+    # "https://github.com/apache/kafka",
+    # "https://github.com/apache/dubbo"
+
 ]
 
 # Directory to clone repositories
@@ -1011,13 +1015,13 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph, 
 
     return results
 
-def generate_detailed_report(results: dict, output_dir: str):
+def generate_detailed_report(results: dict, output_dir: str, repo_name: str):
     """Generate enhanced detailed analysis report in a timestamped folder"""
     # Create timestamp for the run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Create a new directory for this analysis run
-    run_dir = os.path.join(output_dir, f"analysis_run_{timestamp}")
+    run_dir = os.path.join(output_dir, f"{repo_name}_analysis_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
     
     logging.info(f"Generating reports in directory: {run_dir}")
@@ -1157,7 +1161,7 @@ def main():
                 results = analyze_tdd_patterns(matches, commit_graph, commit_analyses)
 
                 # Generate detailed report
-                generate_detailed_report(results, OUTPUT_DIR)
+                generate_detailed_report(results, OUTPUT_DIR, repo_name)
 
     except Exception as e:
         logging.error(f"Fatal error in main execution: {str(e)}")
