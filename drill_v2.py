@@ -1,6 +1,5 @@
 import re
-from typing import Dict, Tuple, List, NamedTuple, Set, Optional
-from dataclasses import dataclass
+from typing import Dict, Tuple, List
 from datetime import datetime, timedelta
 import os
 from collections import defaultdict
@@ -8,7 +7,11 @@ from git import Repo, Commit
 from pydriller import Repository, ModificationType
 import pandas as pd
 import logging
-import networkx as nx
+from FileContent import FileContent
+from FileHistory import FileHistory
+from CommitAnalysis import CommitAnalysis
+from CommitGraph import CommitGraph
+from MatchedPair import MatchedPair
 
 # Create logs directory if it doesn't exist
 if not os.path.exists("logs"):
@@ -29,18 +32,20 @@ logging.basicConfig(
 REPO_URLS = [
     # "https://github.com/apache/bigtop-manager",
     # "https://github.com/apache/commons-csv",
-    "https://github.com/apache/doris-kafka-connector",
-    # "https://github.com/apache/struts-intellij-plugin",
+    # "https://github.com/apache/doris-kafka-connector",
+    "https://github.com/apache/struts-intellij-plugin",
     # "https://github.com/apache/shiro",
     # "https://github.com/apache/hbase",
     # "https://github.com/apache/doris-manager",
     # "https://github.com/apache/commons-io",
     # "https://github.com/apache/tomcat",
-    # "https://github.com/apache/zookeeper",
-    # "https://github.com/apache/iceberg",
-    # "https://github.com/apache/hertzbeat"
-
-
+    # "https://github.com/apache/flink",
+    # "https://github.com/apache/kafka",
+    # "https://github.com/apache/dubbo",
+    # "https://github.com/apache/dubbo-ai", # Krystof - small repository - 0 % TDD
+    # "https://github.com/apache/commons-lang", # Krystof - medium repository - 79.8 % TDD
+    # "https://github.com/apache/maven", # Krystof - medium repository - 4.4 % TDD
+    # "https://github.com/apache/groovy" # Krystof - medium repository - 30.3 % TDD
 ]
 
 # Directory to clone repositories
@@ -70,168 +75,6 @@ TEST_PATTERNS = {
         "annotations": ["@Test", "@Before", "@After", "@BeforeClass", "@AfterClass"],
     }
 }
-
-
-@dataclass
-class FileContent:
-    """Represents parsed content of a file at a specific point in time"""
-    raw_content: str
-    imports: List[str]
-    class_names: List[str]
-    method_names: List[str]
-    is_abstract: bool
-    is_utility: bool
-    test_frameworks: List[str]
-    test_methods: List[str]
-    dependencies: List[str]
-    
-    @property
-    def is_test(self) -> bool:
-        """Determine if file is a test based on content analysis"""
-        return bool(self.test_frameworks and self.test_methods and not self.is_abstract)
-
-
-@dataclass
-class FileHistory:
-    """Tracks a file's history through version control"""
-    creation_date: datetime
-    full_path: str
-    basename: str
-    directory: str
-    last_modified_date: datetime
-    creation_commit: str
-    modifications: List[Tuple[datetime, str]]  # List of (date, commit_hash)
-    content_history: List[Tuple[datetime, FileContent]]
-    related_files: Set[str]  # Set of related file paths
-    is_deleted: bool = False
-
-    @property
-    def latest_content(self) -> Optional[FileContent]:
-        """Get the most recent content version"""
-        return self.content_history[-1][1] if self.content_history else None
-
-    @property
-    def is_test(self) -> bool:
-        """Determine if file is a test based on latest content"""
-        return bool(self.latest_content and self.latest_content.is_test)
-    
-    @property
-    def is_abstract(self) -> bool:
-        """Get abstract status from latest content"""
-        return bool(self.latest_content and self.latest_content.is_abstract)
-    
-    @property
-    def is_utility(self) -> bool:
-        """Get utility status from latest content"""
-        return bool(self.latest_content and self.latest_content.is_utility)   
-     
-class MatchedPair(NamedTuple):
-    test_file: FileHistory
-    source_file: FileHistory
-    directory_match: bool
-    confidence_score: float  # Indicates confidence in the match
-    relationship_type: str  # 'direct', 'abstract', 'utility', etc.
-
-
-@dataclass
-class CommitAnalysis:
-    """Enhanced commit analysis for TDD patterns"""
-    hash: str
-    message: str
-    date: datetime
-    modified_files: List[Tuple[str, FileContent]]  # [(path, content)]
-    lines_added: int
-    lines_removed: int
-    is_merge: bool
-
-    @property
-    def size_category(self) -> str:
-        """Categorize commit size based on changes"""
-        total_changes = self.lines_added + self.lines_removed
-        num_files = len(self.modified_files)
-        if num_files <= 2 and total_changes <= 50:
-            return "small"
-        elif num_files <= 5 and total_changes <= 200:
-            return "medium"
-        else:
-            return "large"
-    
-    def has_tdd_message_indicators(self) -> bool:
-        """Analyzes commit messages for realistic TDD patterns."""
-        msg_lower = self.message.lower()
-        
-        patterns = [
-            r"\btdd\b",
-            r"test[s]?\s*[:+]\s*\w+",
-            r"add(ed|ing)?\s+tests?",
-            r"\btests?\s+first\b", 
-            r"test[s]?\s+[+&]\s+impl",
-        ]
-        
-        return any(re.search(pattern, msg_lower) for pattern in patterns)
-
-    def analyze_commit_context(self) -> bool:
-        """Combines message analysis with code change context"""
-        has_test_indicator = self.has_tdd_message_indicators()
-        test_files_added = any('test' in path.lower() for path, _ in self.modified_files)
-        
-        # Check for test-related content in modified files
-        test_content_changes = False
-        for _, content in self.modified_files:
-            if content.test_methods or content.test_frameworks:
-                test_content_changes = True
-                break
-                
-        return has_test_indicator and (test_files_added or test_content_changes)
-
-    @property
-    def commit_type(self) -> str:
-        """Categorize commit based on changes"""
-        if self.is_merge:
-            return "merge"
-        if self.analyze_commit_context():
-            return "test_related"
-        return "implementation"
-
-
-class CommitGraph:
-    def __init__(self):
-        self.graph = nx.DiGraph()
-
-    def add_commit(self, commit_hash: str, parent_hashes: List[str], branch: str):
-        """Add commit and its parents to the graph with safety checks"""
-        try:
-            if commit_hash:  # Ensure we have a valid commit hash
-                self.graph.add_node(commit_hash, branch=branch)
-                for parent in parent_hashes:
-                    if parent:  # Ensure we have a valid parent hash
-                        self.graph.add_edge(parent, commit_hash)
-        except Exception as e:
-            logging.warning(f"Error adding commit to graph: {str(e)}")
-
-    def get_branch_point(self, commit_hash: str) -> Optional[str]:
-        """Safely get branch point with error handling"""
-        try:
-            if commit_hash not in self.graph:
-                return None
-            predecessors = list(self.graph.predecessors(commit_hash))
-            if len(predecessors) > 1:
-                return commit_hash
-            return None
-        except Exception as e:
-            logging.warning(f"Error getting branch point: {str(e)}")
-            return None
-
-    def find_common_ancestor(self, commit1: str, commit2: str) -> Optional[str]:
-        """Safely find common ancestor with error handling"""
-        try:
-            if commit1 not in self.graph or commit2 not in self.graph:
-                return None
-            return nx.lowest_common_ancestor(self.graph, commit1, commit2)
-        except Exception as e:
-            logging.warning(f"Error finding common ancestor: {str(e)}")
-            return None
-
 
 def clone_repos(repo_urls, clone_dir):
     logging.info(f"Starting repository cloning process for {len(repo_urls)} repos")
@@ -458,7 +301,6 @@ def is_related_directory(test_dir: str, source_dir: str) -> bool:
 
     Handles:
     - Standard Maven/Gradle layout (src/test vs src/main)
-    - Python package testing conventions
     - Nested module structures
     - Integration test directories
     - Custom test directory conventions
@@ -1033,13 +875,13 @@ def analyze_tdd_patterns(matches: List[MatchedPair], commit_graph: CommitGraph, 
 
     return results
 
-def generate_detailed_report(results: dict, output_dir: str):
+def generate_detailed_report(results: dict, output_dir: str, repo_name: str):
     """Generate enhanced detailed analysis report in a timestamped folder"""
     # Create timestamp for the run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Create a new directory for this analysis run
-    run_dir = os.path.join(output_dir, f"analysis_run_{timestamp}")
+    run_dir = os.path.join(output_dir, f"{repo_name}_analysis_run_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
     
     logging.info(f"Generating reports in directory: {run_dir}")
@@ -1179,7 +1021,7 @@ def main():
                 results = analyze_tdd_patterns(matches, commit_graph, commit_analyses)
 
                 # Generate detailed report
-                generate_detailed_report(results, OUTPUT_DIR)
+                generate_detailed_report(results, OUTPUT_DIR, repo_name)
 
     except Exception as e:
         logging.error(f"Fatal error in main execution: {str(e)}")
