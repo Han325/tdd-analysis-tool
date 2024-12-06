@@ -4,6 +4,7 @@ results
 debug_results
 .DS_Store
 logs
+__pycache__
 
 # Java compiled files
 java/build/
