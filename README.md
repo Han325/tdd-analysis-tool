@@ -39,16 +39,20 @@ setup.bat
 ```
 Once the server is running, you may proceed to run the scripts **on another terminal**:
 
-Debugging run, script with less try/catch blocks for faster fault localization:
-```
-python drill_v2_debug.py
-```
-
-Official run, script with more logging statements for easier inspection:
+Command to run the script:
 ```
 python drill_v2.py
 ```
 
+## Extract Results and Analysis
+We have also included a script to dynamically extract the results and perform analysis according to our coursework criteria
+
+Command to run the extraction script:
+```
+python extract.py
+```
+
+Once the extraction script is ran, two directories `extracted_results` and `extraction_logs` will be created, the extracted results will contain the data for analysis. 
 
 ## How Does The Script Works
 
@@ -207,3 +211,4 @@ The tool generates detailed reports including:
   - Commit squashing impacts
   - Branch merge complications
   - Historical data limitations
+
