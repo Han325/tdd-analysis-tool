@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Tuple
-from FileContent import FileContent
+from components.FileContent import FileContent
 
 @dataclass
 class CommitAnalysis:

@@ -1,17 +1,19 @@
-import re
-from typing import Dict, Tuple, List
-from datetime import datetime, timedelta
+import logging
 import os
+import re
+import pandas as pd
+
 from collections import defaultdict
+from datetime import datetime, timedelta
 from git import Repo, Commit
 from pydriller import Repository, ModificationType
-import pandas as pd
-import logging
-from FileContent import FileContent
-from FileHistory import FileHistory
-from CommitAnalysis import CommitAnalysis
-from CommitGraph import CommitGraph
-from MatchedPair import MatchedPair
+from typing import Dict, List, Tuple
+
+from components.FileContent import FileContent
+from components.FileHistory import FileHistory
+from components.CommitAnalysis import CommitAnalysis
+from components.CommitGraph import CommitGraph
+from components.MatchedPair import MatchedPair
 
 # Create logs directory if it doesn't exist
 if not os.path.exists("logs"):
@@ -30,22 +32,7 @@ logging.basicConfig(
 
 # List of repository URLs (Replace with your own urls)
 REPO_URLS = [
-    # "https://github.com/apache/bigtop-manager",
-    # "https://github.com/apache/commons-csv",
-    # "https://github.com/apache/doris-kafka-connector",
-    "https://github.com/apache/struts-intellij-plugin",
-    # "https://github.com/apache/shiro",
-    # "https://github.com/apache/hbase",
-    # "https://github.com/apache/doris-manager",
-    # "https://github.com/apache/commons-io",
-    # "https://github.com/apache/tomcat",
-    # "https://github.com/apache/flink",
-    # "https://github.com/apache/kafka",
-    # "https://github.com/apache/dubbo",
-    # "https://github.com/apache/dubbo-ai", # Krystof - small repository - 0 % TDD
-    # "https://github.com/apache/commons-lang", # Krystof - medium repository - 79.8 % TDD
-    # "https://github.com/apache/maven", # Krystof - medium repository - 4.4 % TDD
-    # "https://github.com/apache/groovy" # Krystof - medium repository - 30.3 % TDD
+    "https://github.com/apache/doris-kafka-connector",
 ]
 
 # Directory to clone repositories

@@ -1,4 +1,4 @@
-from FileHistory import FileHistory
+from components.FileHistory import FileHistory
 from typing import NamedTuple
 
 class MatchedPair(NamedTuple):

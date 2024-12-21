@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Set, Tuple, Optional
-from FileContent import FileContent
+from components.FileContent import FileContent
 from datetime import datetime
 
 @dataclass
